@@ -1,0 +1,1 @@
+### Application for algorithmic trading on the MOEX via the QUIK terminal.
