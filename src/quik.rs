@@ -1,5 +1,6 @@
-extern crate libloading;
-extern crate libc;
+use std::error::Error;
+use libloading;
+use libc;
 use std::ptr;
 use std::ffi::CStr;
 use std::ffi::CString;
@@ -7,21 +8,63 @@ use libloading::{Library, Symbol};
 use libc::{c_char, c_long, c_ulong};
 use tracing::{info, error};
 use tracing_subscriber;
+use std::fmt;
+
 
 type TRANS2QUIK_CONNECTION_STATUS_CALLBACK = ();
 
-pub enum TerminalResult {
-    Trans2quikSuccess,
-    Trans2quikTerminalNotFound,
-    Trans2quikDllVersionNotSupported,
-    Trans2quikDllAlreadyConnectedToQuik,
-    Trans2quikFailed,
-    UnknownResultCode,
+
+pub enum Trans2quikResult {
+    Success,
+    DllAlreadyConnectedToQuik,
 }
+
+#[derive(Debug)]
+pub enum Trans2quikError {
+    TerminalNotFound { error_code: i32, error_message: String },
+    DllVersionNotSupported { error_code: i32, error_message: String },
+    Failed { error_code: i32, error_message: String },
+    Unknown { error_code: i32, error_message: String },
+}
+
+
+impl fmt::Display for Trans2quikError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Trans2quikError::TerminalNotFound { error_code, error_message } => {
+                write!(f, "QUIK terminal not found. Error code: {}, Error message: {}", error_code, error_message)
+            },
+            Trans2quikError::DllVersionNotSupported { error_code, error_message } => {
+                write!(f, "The version of Trans2QUIK.dll used is not supported. Error code: {}, Error message: {}", error_code, error_message)
+            },
+            Trans2quikError::Failed { error_code, error_message } => {
+                write!(f, "An error occurred while establishing a connection. Error code: {}, Error message: {}", error_code, error_message)
+            },
+            Trans2quikError::Unknown { error_code, error_message } => {
+                write!(f, "An unknown error occurred. Error code: {}, Error message: {}", error_code, error_message)
+            },
+        }
+    }
+}
+
+
+impl From<libloading::Error> for Trans2quikError {
+    fn from(err: libloading::Error) -> Trans2quikError {
+        Trans2quikError::Failed {
+            error_code: -1,
+            error_message: err.to_string(),
+        }
+    }
+}
+
+
+impl std::error::Error for Trans2quikError {}
+
 
 pub struct Terminal {
     library: Library,
 }
+
 
 impl Terminal {
     /// Функция используется для загрузки библиотеки DLL
@@ -32,60 +75,66 @@ impl Terminal {
         }
     }
 
+
     /// Функция используется для установления связи с терминалом QUIK.
-    pub fn connect(&self) -> Result<TerminalResult, libloading::Error> {
+    pub fn trans2quik_connect(&self, connection_string: *const c_char, error_code: *mut c_long, error_message: *mut c_char, error_message_len: c_ulong) -> Result<c_long, libloading::Error> {
         // Определяем тип функции
         unsafe {
             // Найдем функцию TRANS2QUIK_CONNECT в библиотеке
-            let connect: Symbol<unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_CONNECT\0").expect("Could not find function");
-            
+            let connect: Symbol<unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_CONNECT\0")?;
+
+            Ok(connect(connection_string, error_code, error_message, error_message_len))
+        }
+    }
+
+
+    pub fn connect(&self) -> Result<Trans2quikResult, Trans2quikError> {
             // Вызываем функцию
             let connection_string = CString::new(r"c:\QUIK Junior").expect("CString::new failed");
             let mut error_code: c_long = 0;
             let mut error_message = vec![0 as c_char; 256];
+            let error_message_len = error_message.len();
 
-            let result = connect(
+            let result = self.trans2quik_connect(
                 connection_string.as_ptr(),
                 &mut error_code as *mut c_long,
                 error_message.as_mut_ptr(),
-                error_message.len() as c_ulong,
-            );
+                error_message_len as c_ulong,
+            )?;
 
-            let error_message = CStr::from_ptr(error_message.as_ptr()).to_string_lossy().into_owned();
+            let error_message = unsafe {
+                CStr::from_ptr(error_message.as_ptr()).to_string_lossy().into_owned()
+            };
 
             match result {
                 0 => {
                     info!("TRANS2QUIK_SUCCESS - соединение установлено успешно");
-                    return Ok(TerminalResult::Trans2quikSuccess)
+                    Ok(Trans2quikResult::Success)
                 },
                 2 => {
-                    info!("TRANS2QUIK_QUIK_TERMINAL_NOT_FOUND - в указанном каталоге либо отсутствует INFO.EXE, либо у него не запущен сервис обработки внешних подключений");
-                    info!("Error code: {}, error message: {}", error_code, error_message);
-                    return Ok(TerminalResult::Trans2quikTerminalNotFound)
+                    error!("TRANS2QUIK_QUIK_TERMINAL_NOT_FOUND");
+                    Err(Trans2quikError::TerminalNotFound { error_code: error_code as i32, error_message })
                 },
                 3 => {
-                    info!("TRANS2QUIK_DLL_VERSION_NOT_SUPPORTED - используемая версия Trans2QUIK.dll не поддерживается указанным INFO.EXE");
-                    info!("Error code: {}, error message: {}", error_code, error_message);
-                    return Ok(TerminalResult::Trans2quikDllVersionNotSupported)
+                    error!("TRANS2QUIK_DLL_VERSION_NOT_SUPPORTED");
+                    Err(Trans2quikError::DllVersionNotSupported { error_code: error_code as i32, error_message })
                 },
                 4 => {
-                    info!("TRANS2QUIK_DLL_ALREADY_CONNECTED_TO_QUIK - соединение уже установлено");
-                    info!("Error code: {}, error message: {}", error_code, error_message);
-                    return Ok(TerminalResult::Trans2quikDllAlreadyConnectedToQuik)
+                    info!("TRANS2QUIK_DLL_ALREADY_CONNECTED_TO_QUIK");
+                    Ok(Trans2quikResult::DllAlreadyConnectedToQuik)
                 },
                 1 => {
-                    info!("TRANS2QUIK_FAILED - произошла ошибка при установлении соединения");
-                    info!("Error code: {}, error message: {}", error_code, error_message);
-                    return Ok(TerminalResult::Trans2quikFailed)
+                    error!("TRANS2QUIK_FAILED - произошла ошибка при установлении соединения");
+                    Err(Trans2quikError::Failed { error_code: error_code as i32, error_message })
                 },
                 _ => {
-                    info!("Unknown result code");
-                    return Ok(TerminalResult::UnknownResultCode)
+                    error!("Unknown result code");
+                    Err(Trans2quikError::Unknown { error_code: error_code as i32, error_message })
                 },
             }
-        }
     }
 }
+
 
 
 

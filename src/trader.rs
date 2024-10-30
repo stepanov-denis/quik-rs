@@ -1,6 +1,6 @@
 pub mod transaction {
-    extern crate libloading;
-    extern crate libc;
+    use libloading;
+    use libc;
     use std::ptr;
     use std::ffi::CStr;
     use std::ffi::CString;
