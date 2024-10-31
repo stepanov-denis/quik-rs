@@ -1,4 +1,4 @@
-use tracing_subscriber;
+use tracing_subscriber::{self, fmt::TestWriter};
 use tracing::{info, error};
 mod quik;
 mod trader;
@@ -12,10 +12,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = r"c:\QUIK Junior\trans2quik.dll";
     let terminal = quik::Terminal::new(path)?;
     terminal.connect()?;
+    terminal.disconnect()?;
     
-    let connection_str = "host=localhost user=postgres dbname=postgres password=password";
-    let database = psql::Db::new(connection_str).await?;
-    database.init().await?;
+    // let connection_str = "host=localhost user=postgres dbname=postgres password=password";
+    // let database = psql::Db::new(connection_str).await?;
+    // database.init().await?;
 
     // Параметры запроса
     // let instrument_code = "AAPL";
