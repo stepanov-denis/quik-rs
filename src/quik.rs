@@ -16,49 +16,12 @@ type TRANS2QUIK_CONNECTION_STATUS_CALLBACK = ();
 
 pub enum Trans2quikResult {
     Success,
+    TerminalNotFound,
+    DllVersionNotSupported,
     DllAlreadyConnectedToQuik,
+    Failed,
+    Unknown,
 }
-
-#[derive(Debug)]
-pub enum Trans2quikError {
-    TerminalNotFound { error_code: i32, error_message: String },
-    DllVersionNotSupported { error_code: i32, error_message: String },
-    Failed { error_code: i32, error_message: String },
-    Unknown { error_code: i32, error_message: String },
-}
-
-
-impl fmt::Display for Trans2quikError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Trans2quikError::TerminalNotFound { error_code, error_message } => {
-                write!(f, "QUIK terminal not found. Error code: {}, Error message: {}", error_code, error_message)
-            },
-            Trans2quikError::DllVersionNotSupported { error_code, error_message } => {
-                write!(f, "The version of Trans2QUIK.dll used is not supported. Error code: {}, Error message: {}", error_code, error_message)
-            },
-            Trans2quikError::Failed { error_code, error_message } => {
-                write!(f, "An error occurred while establishing a connection. Error code: {}, Error message: {}", error_code, error_message)
-            },
-            Trans2quikError::Unknown { error_code, error_message } => {
-                write!(f, "An unknown error occurred. Error code: {}, Error message: {}", error_code, error_message)
-            },
-        }
-    }
-}
-
-
-impl From<libloading::Error> for Trans2quikError {
-    fn from(err: libloading::Error) -> Trans2quikError {
-        Trans2quikError::Failed {
-            error_code: -1,
-            error_message: err.to_string(),
-        }
-    }
-}
-
-
-impl std::error::Error for Trans2quikError {}
 
 
 pub struct Terminal {
@@ -70,7 +33,8 @@ impl Terminal {
     /// Функция используется для загрузки библиотеки DLL
     pub fn new(path: &str) -> Result<Self, libloading::Error> {
         unsafe {
-            let library = Library::new(path)?;
+            let library = Library::new(path).map_err(|e| { error!("DLL loading error: {:?}", e); e})?;
+            
             Ok(Terminal { library })
         }
     }
@@ -81,29 +45,29 @@ impl Terminal {
         // Определяем тип функции
         unsafe {
             // Найдем функцию TRANS2QUIK_CONNECT в библиотеке
-            let connect: Symbol<unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_CONNECT\0")?;
+            let connect: Symbol<unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_CONNECT\0").map_err(|e| { error!("TRANS2QUIK_CONNECT error: {}", e); e})?;
 
             Ok(connect(connection_string, error_code, error_message, error_message_len))
         }
     }
 
 
-    pub fn connect(&self) -> Result<Trans2quikResult, Trans2quikError> {
+    pub fn connect(&self) -> Result<Trans2quikResult, libloading::Error> {
             // Вызываем функцию
             let connection_string = CString::new(r"c:\QUIK Junior").expect("CString::new failed");
-            let mut error_code: c_long = 0;
-            let mut error_message = vec![0 as c_char; 256];
-            let error_message_len = error_message.len();
+            let mut result_code: c_long = 0;
+            let mut result_message = vec![0 as c_char; 256];
+            let result_message_len = result_message.len();
 
             let result = self.trans2quik_connect(
                 connection_string.as_ptr(),
-                &mut error_code as *mut c_long,
-                error_message.as_mut_ptr(),
-                error_message_len as c_ulong,
+                &mut result_code as *mut c_long,
+                result_message.as_mut_ptr(),
+                result_message_len as c_ulong,
             )?;
 
-            let error_message = unsafe {
-                CStr::from_ptr(error_message.as_ptr()).to_string_lossy().into_owned()
+            let result_message = unsafe {
+                CStr::from_ptr(result_message.as_ptr()).to_string_lossy().into_owned()
             };
 
             match result {
@@ -112,24 +76,24 @@ impl Terminal {
                     Ok(Trans2quikResult::Success)
                 },
                 2 => {
-                    error!("TRANS2QUIK_QUIK_TERMINAL_NOT_FOUND");
-                    Err(Trans2quikError::TerminalNotFound { error_code: error_code as i32, error_message })
+                    info!("Result_code: {}, message: {}", result_code, result_message);
+                    Ok(Trans2quikResult::TerminalNotFound)
                 },
                 3 => {
-                    error!("TRANS2QUIK_DLL_VERSION_NOT_SUPPORTED");
-                    Err(Trans2quikError::DllVersionNotSupported { error_code: error_code as i32, error_message })
+                    info!("Result_code: {}, messsage: {}", result_code, result_message);
+                    Ok(Trans2quikResult::DllVersionNotSupported)
                 },
                 4 => {
-                    info!("TRANS2QUIK_DLL_ALREADY_CONNECTED_TO_QUIK");
+                    info!("Result_code: {}, message: {}", result_code, result_message);
                     Ok(Trans2quikResult::DllAlreadyConnectedToQuik)
                 },
                 1 => {
-                    error!("TRANS2QUIK_FAILED - произошла ошибка при установлении соединения");
-                    Err(Trans2quikError::Failed { error_code: error_code as i32, error_message })
+                    info!("Result_code: {}, message: {}", result_code, result_message);
+                    Ok(Trans2quikResult::Failed)
                 },
                 _ => {
-                    error!("Unknown result code");
-                    Err(Trans2quikError::Unknown { error_code: error_code as i32, error_message })
+                    info!("Unknown result code: {}, message: {}", result_code, result_message);
+                    Ok(Trans2quikResult::Unknown)
                 },
             }
     }
