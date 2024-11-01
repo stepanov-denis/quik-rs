@@ -80,13 +80,13 @@ impl From<c_long> for Trans2quikResult {
     }
 }
 
-/// The `Terminal` structure is used to interact with the QUIK trading terminal through the library `Trans2QUIK.dll `.
+/// The `Terminal` structure is used to interact with the QUIK trading terminal through the library `Trans2QUIK.dll`.
 ///
 /// This structure provides loading of the DLL library `Trans2QUIK.dll `, establishing a connection to the QUIK terminal
 /// and calling functions from the library to control the terminal and perform trading operations.
 ///
 /// # Example of use
-/// ``
+/// ```
 /// let path = r"c:\QUIK Junior\trans2quik.dll";
 /// let terminal = quik::Terminal::new(path)?;
 /// terminal.connect()?;
@@ -94,44 +94,80 @@ impl From<c_long> for Trans2quikResult {
 pub struct Terminal {
     /// Loading a dynamic library `Trans2QUIK.dll `, which provides an API for interacting with QUIK.
     library: Library,
+
+    /// Calling a function from the library Trans2QUIK.dll for establishing communication with the QUIK terminal.
+    trans2quik_connect: unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long,
+
+    /// Calling a function from the library Trans2QUIK.dll to disconnecting from the QUIK terminal.
+    trans2quik_disconnect: unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long,
+
+    /// Calling a function from the library Trans2QUIK.dll to check for a connection between the QUIK terminal and the server.
+    trans2quik_is_quik_connected: unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long,
+
+    /// Calling a function from the library Trans2QUIK.dll to check if there is a connection between the library Trans2QUIK.dll and the QUIK terminal.
+    trans2quik_is_dll_connected: unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long,
 }
 
 
 impl Terminal {
-    /// The function is used to load the library Trans2QUIK.dll .
-    pub fn new(path: &str) -> Result<Self, libloading::Error> {
-        unsafe {
-            let library = Library::new(path).map_err(|e| { error!("DLL loading error: {:?}", e); e})?;
-            
-            Ok(Terminal { library })
-        }
+    /// The function is used to load the library Trans2QUIK.dll.
+    pub fn new(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        // Loading a dynamic library `Trans2QUIK.dll `, which provides an API for interacting with QUIK.
+        let library = unsafe {
+            Library::new(path).map_err(|e| { error!("Trans2QUIK.dll loading error: {:?}", e); e})?
+        };
+
+        // Calling a function from the library Trans2QUIK.dll for establishing communication with the QUIK terminal.
+        let trans2quik_connect = unsafe {
+            let symbol: Symbol<unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long> = library.get(b"TRANS2QUIK_CONNECT\0").map_err(|e| { error!("TRANS2QUIK_CONNECT error: {}", e); e})?;
+            *symbol
+        };
+
+        // Calling a function from the library Trans2QUIK.dll to disconnecting from the QUIK terminal.
+        let trans2quik_disconnect = unsafe {
+            let symbol: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long> = library.get(b"TRANS2QUIK_DISCONNECT\0").map_err(|e| { error!("TRANS2QUIK_DISCONNECT error: {}", e); e})?;
+            *symbol
+        };
+
+        // Calling a function from the library Trans2QUIK.dll to check for a connection between the QUIK terminal and the server.
+        let trans2quik_is_quik_connected = unsafe {
+            let symbol: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long> = library.get(b"TRANS2QUIK_IS_QUIK_CONNECTED\0").map_err(|e| { error!("TRANS2QUIK_IS_QUIK_CONNECTED error: {}", e); e})?;
+            *symbol
+        };
+
+        // Calling a function from the library Trans2QUIK.dll to check if there is a connection between the library Trans2QUIK.dll and the QUIK terminal.
+        let trans2quik_is_dll_connected = unsafe {
+            let symbol: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long> = library.get(b"TRANS2QUIK_IS_DLL_CONNECTED\0").map_err(|e| { error!("TRANS2QUIK_IS_DLL_CONNECTED error: {}", e); e})?;
+            *symbol
+        };
+        
+        Ok(Terminal {
+            library,
+            trans2quik_connect,
+            trans2quik_disconnect,
+            trans2quik_is_quik_connected,
+            trans2quik_is_dll_connected,
+        })
     }
 
-
-    /// The function is used to call from the library Trans2QUIK.dll functions for establishing communication with the QUIK terminal.
-    fn trans2quik_connect(&self, connection_string: *const c_char, result_code: *mut c_long, result_message: *mut c_char, result_message_len: c_ulong) -> Result<c_long, libloading::Error> {
-        unsafe {
-            let connect: Symbol<unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_CONNECT\0").map_err(|e| { error!("TRANS2QUIK_CONNECT error: {}", e); e})?;
-
-            Ok(connect(connection_string, result_code, result_message, result_message_len))
-        }
-    }
 
     /// The function is used to establish communication with the QUIK terminal.
-    pub fn connect(&self) -> Result<Trans2quikResult, libloading::Error> {
+    pub fn connect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         // Prepare the parameters
         let connection_string = CString::new(r"c:\QUIK Junior").expect("CString::new failed");
-        let mut result_code: c_long = -1;
+        let mut result_code: c_long = 0;
         let mut result_message = vec![0 as c_char; 256];
         let mut result_message_len = result_message.len();
     
         // Call the function
-        let function_result = self.trans2quik_connect(
-            connection_string.as_ptr(),
-            &mut result_code as *mut c_long,
-            result_message.as_mut_ptr(),
-            result_message_len as c_ulong,
-        )?;
+        let function_result = unsafe {
+            (self.trans2quik_connect)(
+                connection_string.as_ptr(),
+                &mut result_code as *mut c_long,
+                result_message.as_mut_ptr(),
+                result_message_len as c_ulong,
+            )
+        };
     
         // Convert the result message
         let result_message = unsafe {
@@ -148,28 +184,22 @@ impl Terminal {
         Ok(trans2quik_result)
     }
 
-    /// The function is used to call from the library Trans2QUIK.dll the functions of disconnecting from the QUIK terminal.
-    fn trans2quik_disconnect(&self, result_code: *mut c_long, result_message: *mut c_char, result_message_len: c_ulong) -> Result<c_long, libloading::Error> {
-        unsafe {
-            let disconnect: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_DISCONNECT\0").map_err(|e| { error!("TRANS2QUIK_DISCONNECT error: {}", e); e})?;
-
-            Ok(disconnect(result_code, result_message, result_message_len))
-        }
-    }
 
     /// The function is used to disconnect from the QUIK terminal.
-    pub fn disconnect(&self) -> Result<Trans2quikResult, libloading::Error> {
+    pub fn disconnect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         // Prepare the parameters
         let mut result_code: c_long = 0;
         let mut result_message = vec![0 as c_char; 256];
         let mut result_message_len = result_message.len();
     
         // Call the function
-        let function_result = self.trans2quik_disconnect(
-            &mut result_code as *mut c_long,
-            result_message.as_mut_ptr(),
-            result_message_len as c_ulong,
-        )?;
+        let function_result = unsafe {
+            (self.trans2quik_disconnect)(
+                &mut result_code as *mut c_long,
+                result_message.as_mut_ptr(),
+                result_message_len as c_ulong,
+            )
+        };
     
         // Convert the result message
         let result_message = unsafe {
@@ -187,29 +217,21 @@ impl Terminal {
     }
 
 
-    /// The function is used to call the function to check for a connection between the QUIK terminal and the server.
-    fn trans2quik_is_quik_connected(&self, result_code: *mut c_long, result_message: *mut c_char, result_message_len: c_ulong) -> Result<c_long, libloading::Error> {
-        unsafe {
-            let is_quik_connected: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long> = self.library.get(b"TRANS2QUIK_IS_QUIK_CONNECTED\0").map_err(|e| { error!("TRANS2QUIK_IS_QUIK_CONNECTED error: {}", e); e})?;
-
-            Ok(is_quik_connected(result_code, result_message, result_message_len))
-        }
-    }
-
-
     /// The function is used to check if there is a connection between the QUIK terminal and the server.
-    pub fn is_quik_connected(&self) -> Result<Trans2quikResult, libloading::Error> {
+    pub fn is_quik_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         // Prepare the parameters
         let mut result_code: c_long = 0;
         let mut result_message = vec![0 as c_char; 256];
         let result_message_len = result_message.len();
     
         // Call the function
-        let function_result = self.trans2quik_is_quik_connected(
-            &mut result_code as *mut c_long,
-            result_message.as_mut_ptr(),
-            result_message_len as c_ulong,
-        )?;
+        let function_result = unsafe {
+            (self.trans2quik_is_quik_connected)(
+                &mut result_code as *mut c_long,
+                result_message.as_mut_ptr(),
+                result_message_len as c_ulong,
+            )
+        };
     
         // Convert the result message
         let result_message = unsafe {
@@ -225,45 +247,37 @@ impl Terminal {
         // Return the result
         Ok(trans2quik_result)
     }
-}
 
 
-/// Функция используется для проверки наличия соединения между библиотекой Trans2QUIK.dll и терминалом QUIK.
-pub fn is_dll_connected(lib: &Library) -> bool {
-    // Определяем тип функции
-    unsafe {
-        // Найдем функцию TRANS2QUIK_IS_DLL_CONNECTED в библиотеке
-        let is_dll_connected: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long> = lib.get(b"TRANS2QUIK_IS_DLL_CONNECTED\0").expect("Could not find function");
-        
-        // Вызываем функцию
-        let mut error_code: c_long = 0;
-        let mut error_message = vec![0 as c_char; 256];
-
-        let result = is_dll_connected(
-            &mut error_code as *mut c_long,
-            error_message.as_mut_ptr(),
-            error_message.len() as c_ulong
-        );
-
-        let error_message = CStr::from_ptr(error_message.as_ptr()).to_string_lossy().into_owned();
-
-        match result {
-            10 => info!(" TRANS2QUIK_DLL_CONNECTED - соединение библиотеки Trans2QUIK.dll с терминалом QUIK установлено"),
-            7 => {
-                info!("TRANS2QUIK_DLL_NOT_CONNECTED - не установлена связь библиотеки Trans2QUIK.dll с терминалом QUIK");
-                info!("Error code: {}, error message: {}", error_code, error_message);
-            },
-            _ => info!("Unknown result code"),
-        }
-
-        if result == 10
-        {
-            return true
-        }
-        else
-        {
-            return false
-        }
+    /// Checking for a connection between the library Trans2QUIK.dll and the QUIK terminal.
+    pub fn is_dll_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+        // Prepare the parameters
+        let mut result_code: c_long = 0;
+        let mut result_message = vec![0 as c_char; 256];
+        let result_message_len = result_message.len();
+    
+        // Call the function
+        let function_result = unsafe {
+            (self.trans2quik_is_dll_connected)(
+                &mut result_code as *mut c_long,
+                result_message.as_mut_ptr(),
+                result_message_len as c_ulong,
+            )
+        };
+    
+        // Convert the result message
+        let result_message = unsafe {
+            CStr::from_ptr(result_message.as_ptr()).to_string_lossy().into_owned()
+        };
+    
+        // Map the result_code to Trans2quikResult
+        let trans2quik_result = Trans2quikResult::from(function_result);
+    
+        // Log the result
+        info!("TRANS2QUIK_IS_QUIK_CONNECTED -> {:?}: {}", trans2quik_result, result_message);
+    
+        // Return the result
+        Ok(trans2quik_result)
     }
 }
 
