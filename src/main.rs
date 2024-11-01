@@ -12,6 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = r"c:\QUIK Junior\trans2quik.dll";
     let terminal = quik::Terminal::new(path)?;
     terminal.connect()?;
+    terminal.is_quik_connected()?;
     terminal.disconnect()?;
     
     // let connection_str = "host=localhost user=postgres dbname=postgres password=password";
