@@ -5,7 +5,7 @@ use std::ptr;
 use std::ffi::CStr;
 use std::ffi::CString;
 use libloading::{Library, Symbol};
-use libc::{c_char, c_long, c_ulong};
+use libc::{c_char, c_long, c_ulong, c_void};
 use tracing::{info, error};
 use tracing_subscriber;
 use std::fmt;
@@ -80,6 +80,22 @@ impl From<c_long> for Trans2quikResult {
     }
 }
 
+
+/// Loads the symbol from the library Trans2QUIK.dll
+fn load_symbol<T>(
+    library: &Library,
+    name: &[u8],
+) -> Result<T, Box<dyn std::error::Error>>
+where
+    T: Copy,
+{
+    unsafe {
+        let symbol: Symbol<T> = library.get(name)?;
+        Ok(*symbol)
+    }
+}
+
+
 /// The `Terminal` structure is used to interact with the QUIK trading terminal through the library `Trans2QUIK.dll`.
 ///
 /// This structure provides loading of the DLL library `Trans2QUIK.dll `, establishing a connection to the QUIK terminal
@@ -92,7 +108,7 @@ impl From<c_long> for Trans2quikResult {
 /// terminal.connect()?;
 /// ```
 pub struct Terminal {
-    /// Loading a dynamic library `Trans2QUIK.dll `, which provides an API for interacting with QUIK.
+    /// Loading a dynamic library Trans2QUIK.dll , which provides an API for interacting with QUIK.
     library: Library,
 
     /// Calling a function from the library Trans2QUIK.dll for establishing communication with the QUIK terminal.
@@ -107,22 +123,10 @@ pub struct Terminal {
     /// Calling a function from the library Trans2QUIK.dll to check if there is a connection between the library Trans2QUIK.dll and the QUIK terminal.
     trans2quik_is_dll_connected: unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long,
 
-    // trans2quik_connection_status_callback: unsafe extern "C" fn(*mut c_long, *mut c_char) -> c_long,
-}
+    /// Prototype of a callback function for status monitoring connections.
+    trans2quik_connection_status_callback: unsafe extern "C" fn(*mut c_long, *mut c_long, *mut c_char) -> c_void,
 
-
-/// Loads the symbol from the library Trans2QUIK.dll
-fn load_symbol<T>(
-    library: &Library,
-    name: &[u8],
-) -> Result<T, Box<dyn std::error::Error>>
-where
-    T: Copy,
-{
-    unsafe {
-        let symbol: Symbol<T> = library.get(name)?;
-        Ok(*symbol)
-    }
+    // А callback function for processing the received connection information.
 }
 
 
@@ -160,6 +164,13 @@ impl Terminal {
             *mut c_char,
             c_ulong,
         ) -> c_long>(&library, b"TRANS2QUIK_IS_DLL_CONNECTED\0")?;
+
+        // Prototype of a callback function for status monitoring connections.
+        let trans2quik_connection_status_callback = load_symbol::<unsafe extern "C" fn(
+            *mut c_long,
+            *mut c_long,
+            *mut c_char,
+        ) -> c_void>(&library, b"TRANS2QUIK_CONNECTION_STATUS_CALLBACK\0")?;
         
         Ok(Terminal {
             library,
@@ -167,6 +178,7 @@ impl Terminal {
             trans2quik_disconnect,
             trans2quik_is_quik_connected,
             trans2quik_is_dll_connected,
+            trans2quik_connection_status_callback,
         })
     }
 
@@ -270,68 +282,33 @@ impl Terminal {
 
         self.call_trans2quik_function("TRANS2QUIK_IS_DLL_CONNECTED", function)
     }
-}
 
 
-/// Описание прототипа Функции обратного вызова для контроля за состоянием соединения 
-/// между библиотекой Trans2QUIK.dll и используемым терминалом QUIK и между 
-/// используемым терминалом QUIK и сервером.
-pub fn connection_status_callback(lib: &Library) {
-    // Определяем тип функции
-    unsafe {
-        // Найдем функцию TRANS2QUIK_CONNECTION_STATUS_CALLBACK в библиотеке
-        let connection_status_callback: Symbol<unsafe extern "C" fn(*mut c_long, *mut c_char) -> c_long> = lib.get(b"TRANS2QUIK_CONNECTION_STATUS_CALLBACK\0").expect("Could not find function");
-        
-        // Вызываем функцию
-        let mut error_code: c_long = 0;
-        let mut error_message = vec![0 as c_char; 256];
+    /// Prototype of a callback function for status monitoring connections.
+    pub fn connection_status_callback(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+        let mut connection_event: c_long = -1;
+        let mut result_code: c_long = 0;
+        let mut result_message = vec![0 as c_char; 256];
 
-        let result = connection_status_callback(
-            &mut error_code as *mut c_long,
-            error_message.as_mut_ptr()
+        // Вызов функции
+        let function_result = unsafe {
+            (self.trans2quik_connection_status_callback)(
+                &mut connection_event as *mut c_long,
+                &mut result_code as *mut c_long,
+                result_message.as_mut_ptr(),
+            )
+        } as c_long;
+
+        let result_message = unsafe {
+            CStr::from_ptr(result_message.as_ptr())
+                .to_string_lossy()
+                .into_owned()
+        };
+        let trans2quik_result = Trans2quikResult::from(function_result);
+        println!(
+            "-> {:?} {}",
+            trans2quik_result, result_message
         );
-
-        let error_message = CStr::from_ptr(error_message.as_ptr()).to_string_lossy().into_owned();
-    }
-}
-
-
-/// Описание прототипа функции обратного вызова для обработки полученной информации о соединении
-pub fn set_connection_status_callback(lib: &Library) -> bool {
-    // Определяем тип функции
-    unsafe {
-        // Найдем функцию  TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK в библиотеке
-        let set_connection_status_callback: Symbol<unsafe extern "C" fn(Option<TRANS2QUIK_CONNECTION_STATUS_CALLBACK>, *mut c_long, *mut c_char, c_ulong) -> c_long> = lib.get(b"TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK\0").expect("Could not find function");
-        
-        // Вызываем функцию
-        let mut error_code: c_long = 0;
-        let mut error_message = vec![0 as c_char; 256];
-
-        let result = set_connection_status_callback(
-            Some(connection_status_callback(&lib)),
-            &mut error_code as *mut c_long,
-            error_message.as_mut_ptr(),
-            error_message.len() as c_ulong
-        );
-
-        let error_message = CStr::from_ptr(error_message.as_ptr()).to_string_lossy().into_owned();
-
-        match result {
-            0 => info!("TRANS2QUIK_SUCCESS - функция обратного вызова установлена"),
-            1 => {
-                info!("TRANS2QUIK_FAILED - функцию обратного вызова установить не удалось");
-                info!("Error code: {}, error message: {}", error_code, error_message);
-            },
-            _ => info!("Unknown result code"),
-        }
-
-        if result == 10
-        {
-            return true
-        }
-        else
-        {
-            return false
-        }
+        Ok(trans2quik_result)
     }
 }
