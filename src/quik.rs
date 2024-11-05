@@ -9,9 +9,16 @@ use libc::{c_char, c_long, c_ulong, c_void};
 use tracing::{info, error};
 use tracing_subscriber;
 use std::fmt;
+use std::sync::Mutex;
+use lazy_static::lazy_static;
+use std::str;
 
 
-type TRANS2QUIK_CONNECTION_STATUS_CALLBACK = ();
+type Trans2QuikConnectionStatusCallback = unsafe extern "C" fn(
+    connection_event: *mut c_long,
+    error_code: *mut c_long,
+    error_message: *mut c_char,
+) -> c_void;
 
 
 /// Corresponds to the description of constants whose values are returned when exiting functions
@@ -90,7 +97,7 @@ where
     T: Copy,
 {
     unsafe {
-        let symbol: Symbol<T> = library.get(name)?;
+        let symbol: Symbol<T> = library.get(name).map_err(|e| { error!("Load '{}' from `Trans2QUIK.dll` error: {}", str::from_utf8_unchecked(name), e); e})?;
         Ok(*symbol)
     }
 }
@@ -126,7 +133,8 @@ pub struct Terminal {
     /// Prototype of a callback function for status monitoring connections.
     trans2quik_connection_status_callback: unsafe extern "C" fn(*mut c_long, *mut c_long, *mut c_char) -> c_void,
 
-    // А callback function for processing the received connection information.
+    /// А callback function for processing the received connection information.
+    trans2quik_set_connection_status_callback: unsafe extern "C" fn(*mut Trans2QuikConnectionStatusCallback, *mut c_long, *mut c_char, c_ulong) -> c_long,
 }
 
 
@@ -171,6 +179,14 @@ impl Terminal {
             *mut c_long,
             *mut c_char,
         ) -> c_void>(&library, b"TRANS2QUIK_CONNECTION_STATUS_CALLBACK\0")?;
+
+        // А callback function for processing the received connection information.
+        let trans2quik_set_connection_status_callback = load_symbol::<unsafe extern "C" fn(
+            *mut Trans2QuikConnectionStatusCallback,
+            *mut c_long,
+            *mut c_char,
+            c_ulong,
+        ) -> c_long>(&library, b"TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK\0")?;
         
         Ok(Terminal {
             library,
@@ -179,6 +195,7 @@ impl Terminal {
             trans2quik_is_quik_connected,
             trans2quik_is_dll_connected,
             trans2quik_connection_status_callback,
+            trans2quik_set_connection_status_callback,
         })
     }
 
@@ -192,26 +209,26 @@ impl Terminal {
     where
         F: FnOnce(&mut c_long, *mut c_char, c_ulong) -> c_long,
     {
-        let mut result_code: c_long = 0;
-        let mut result_message = vec![0 as c_char; 256];
-        let result_message_len = result_message.len() as c_ulong;
+        let mut error_code: c_long = 0;
+        let mut error_message = vec![0 as c_char; 256];
+        let error_message_len = error_message.len() as c_ulong;
 
         // Вызов функции
         let function_result = func(
-            &mut result_code,
-            result_message.as_mut_ptr(),
-            result_message_len,
+            &mut error_code,
+            error_message.as_mut_ptr(),
+            error_message_len,
         );
 
-        let result_message = unsafe {
-            CStr::from_ptr(result_message.as_ptr())
+        let error_message = unsafe {
+            CStr::from_ptr(error_message.as_ptr())
                 .to_string_lossy()
                 .into_owned()
         };
         let trans2quik_result = Trans2quikResult::from(function_result);
         println!(
             "{} -> {:?} {}",
-            function_name, trans2quik_result, result_message
+            function_name, trans2quik_result, error_message
         );
         Ok(trans2quik_result)
     }
@@ -221,14 +238,14 @@ impl Terminal {
     pub fn connect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         let connection_string = CString::new(r"c:\QUIK Junior")?;
 
-        let function = |result_code: &mut c_long,
-                        result_message_ptr: *mut c_char,
-                        result_message_len: c_ulong| unsafe {
+        let function = |error_code: &mut c_long,
+                        error_message: *mut c_char,
+                        error_message_len: c_ulong| unsafe {
             (self.trans2quik_connect)(
                 connection_string.as_ptr(),
-                result_code,
-                result_message_ptr,
-                result_message_len,
+                error_code,
+                error_message,
+                error_message_len,
             )
         };
 
@@ -238,13 +255,13 @@ impl Terminal {
 
     /// The function is used to disconnect from the QUIK terminal.
     pub fn disconnect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let function = |result_code: &mut c_long,
-                        result_message_ptr: *mut c_char,
-                        result_message_len: c_ulong| unsafe {
+        let function = |error_code: &mut c_long,
+                        error_message: *mut c_char,
+                        error_message_len: c_ulong| unsafe {
             (self.trans2quik_disconnect)(
-                result_code,
-                result_message_ptr,
-                result_message_len,
+                error_code,
+                error_message,
+                error_message_len,
             )
         };
 
@@ -254,13 +271,13 @@ impl Terminal {
 
     /// The function is used to check if there is a connection between the QUIK terminal and the server.
     pub fn is_quik_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let function = |result_code: &mut c_long,
-                        result_message_ptr: *mut c_char,
-                        result_message_len: c_ulong| unsafe {
+        let function = |error_code: &mut c_long,
+                        error_message: *mut c_char,
+                        error_message_len: c_ulong| unsafe {
             (self.trans2quik_is_quik_connected)(
-                result_code,
-                result_message_ptr,
-                result_message_len,
+                error_code,
+                error_message,
+                error_message_len,
             )
         };
 
@@ -270,13 +287,13 @@ impl Terminal {
 
     /// Checking for a connection between the library Trans2QUIK.dll and the QUIK terminal.
     pub fn is_dll_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let function = |result_code: &mut c_long,
-                        result_message_ptr: *mut c_char,
-                        result_message_len: c_ulong| unsafe {
+        let function = |error_code: &mut c_long,
+                        error_message: *mut c_char,
+                        error_message_len: c_ulong| unsafe {
             (self.trans2quik_is_dll_connected)(
-                result_code,
-                result_message_ptr,
-                result_message_len,
+                error_code,
+                error_message,
+                error_message_len,
             )
         };
 
@@ -285,30 +302,65 @@ impl Terminal {
 
 
     /// Prototype of a callback function for status monitoring connections.
-    pub fn connection_status_callback(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let mut connection_event: c_long = -1;
-        let mut result_code: c_long = 0;
-        let mut result_message = vec![0 as c_char; 256];
+    pub fn connection_status_callback(&self) -> c_void {
+        let mut connection_event: c_long = 0;
+        let mut error_code: c_long = 0;
+        let mut error_message = vec![0 as c_char; 256];
 
         // Вызов функции
         let function_result = unsafe {
             (self.trans2quik_connection_status_callback)(
                 &mut connection_event as *mut c_long,
-                &mut result_code as *mut c_long,
-                result_message.as_mut_ptr(),
+                &mut error_code as *mut c_long,
+                error_message.as_mut_ptr(),
             )
-        } as c_long;
+        };
 
-        let result_message = unsafe {
-            CStr::from_ptr(result_message.as_ptr())
+        let error_message = unsafe {
+            CStr::from_ptr(error_message.as_ptr())
                 .to_string_lossy()
                 .into_owned()
         };
+
+        // let trans2quik_result = Trans2quikResult::from(function_result);
+
+        info!(
+            "TRANS2QUIK_CONNECTION_STATUS_CALLBACK -> {} {} {}",
+            connection_event, error_code, error_message
+        );
+
+        function_result
+    }
+
+
+    /// А callback function for processing the received connection information.
+    pub fn set_connection_status_callback(&mut self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+        let mut error_code: c_long = 0;
+        let mut error_message = vec![0 as c_char; 256];
+        let error_message_len = error_message.len() as c_ulong;
+
+        // Вызов функции
+        let function_result = unsafe {
+            (self.trans2quik_set_connection_status_callback)(
+                &mut self.trans2quik_connection_status_callback,
+                &mut error_code,
+                error_message.as_mut_ptr(),
+                error_message_len,
+            )
+        };
+
+        let error_message = unsafe {
+            CStr::from_ptr(error_message.as_ptr())
+                .to_string_lossy()
+                .into_owned()
+        };
+
         let trans2quik_result = Trans2quikResult::from(function_result);
         println!(
-            "-> {:?} {}",
-            trans2quik_result, result_message
+            "TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK -> {:?} {}",
+            trans2quik_result, error_message
         );
         Ok(trans2quik_result)
     }
+
 }

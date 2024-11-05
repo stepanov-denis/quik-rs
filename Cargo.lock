@@ -741,6 +741,7 @@ dependencies = [
  "bb8",
  "bb8-postgres",
  "chrono",
+ "lazy_static",
  "libc",
  "libloading",
  "rust_decimal",

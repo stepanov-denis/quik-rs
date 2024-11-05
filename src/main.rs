@@ -10,8 +10,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let path = r"c:\QUIK Junior\trans2quik.dll";
-    let terminal = quik::Terminal::new(path)?;
+    let mut terminal = quik::Terminal::new(path)?;
     terminal.connect()?;
+    terminal.set_connection_status_callback()?;
     terminal.is_dll_connected()?;
     terminal.is_quik_connected()?;
     terminal.disconnect()?;
