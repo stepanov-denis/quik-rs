@@ -1,17 +1,20 @@
-use std::error::Error;
 use libloading;
 use libc;
-use std::ptr;
 use std::ffi::CStr;
 use std::ffi::CString;
 use libloading::{Library, Symbol};
-use libc::{c_char, c_long, c_ulong, c_void};
+use libc::{c_char, c_long, c_ulong, c_double};
 use tracing::{info, error};
-use tracing_subscriber;
-use std::fmt;
-use std::sync::Mutex;
-use lazy_static::lazy_static;
 use std::str;
+
+
+// Этот тип может иметь разную ширину в зависимости от платформы, 
+// поэтому используем cfg для определения типа.
+#[cfg(target_pointer_width = "64")]
+type IntPtr = i64;
+
+
+type SubsribeOrders = unsafe extern "C" fn(*const c_char, *const c_char) -> c_long;
 
 
 type Trans2QuikConnectionStatusCallback = unsafe extern "C" fn(
@@ -132,6 +135,21 @@ pub struct Terminal {
 
     /// А callback function for processing the received connection information.
     trans2quik_set_connection_status_callback: unsafe extern "C" fn(Trans2QuikConnectionStatusCallback, *mut c_long, *mut c_char, c_ulong) -> c_long,
+
+    /// Синхронная отправка транзакции. При синхронной отправке возврат из функции происходит 
+    /// только после получения результата выполнения транзакции, либо после разрыва связи 
+    /// терминала QUIK с сервером.
+    trans2quik_send_sync_transaction: unsafe extern "C" fn(
+        *const c_char,
+        *mut c_long,
+        *mut c_ulong,
+        *mut c_double,
+        *mut c_char,
+        c_ulong,
+        *mut c_long,
+        *mut c_char,
+        c_ulong
+    ) -> c_long,
 }
 
 
@@ -177,6 +195,21 @@ impl Terminal {
             *mut c_char,
             c_ulong,
         ) -> c_long>(&library, b"TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK\0")?;
+
+        // Синхронная отправка транзакции. При синхронной отправке возврат из функции происходит 
+        // только после получения результата выполнения транзакции, либо после разрыва связи 
+        // терминала QUIK с сервером.
+        let trans2quik_send_sync_transaction = load_symbol::<unsafe extern "C" fn(
+            *const c_char,
+            *mut c_long,
+            *mut c_ulong,
+            *mut c_double,
+            *mut c_char,
+            c_ulong,
+            *mut c_long,
+            *mut c_char,
+            c_ulong
+        ) -> c_long>(&library, b"TRANS2QUIK_SEND_SYNC_TRANSACTION\0")?;
         
         Ok(Terminal {
             library,
@@ -184,8 +217,8 @@ impl Terminal {
             trans2quik_disconnect,
             trans2quik_is_quik_connected,
             trans2quik_is_dll_connected,
-            // trans2quik_connection_status_callback,
             trans2quik_set_connection_status_callback,
+            trans2quik_send_sync_transaction,
         })
     }
 
@@ -217,8 +250,8 @@ impl Terminal {
         };
         let trans2quik_result = Trans2quikResult::from(function_result);
         info!(
-            "{} -> {:?} {}",
-            function_name, trans2quik_result, error_message
+            "{} -> {:?}, error_code: {}, error_message: {}",
+            function_name, trans2quik_result, error_code, error_message
         );
         Ok(trans2quik_result)
     }
@@ -297,7 +330,6 @@ impl Terminal {
         let mut error_message = vec![0 as c_char; 256];
         let error_message_len = error_message.len() as c_ulong;
 
-        // Вызов функции
         let function_result = unsafe {
             (self.trans2quik_set_connection_status_callback)(
                 connection_status_callback,
@@ -315,9 +347,64 @@ impl Terminal {
 
         let trans2quik_result = Trans2quikResult::from(function_result);
         info!(
-            "TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK -> {:?} {} {}",
+            "TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK -> {:?}, error_code: {}, error_message: {}",
             trans2quik_result, error_code, error_message
         );
+
+        Ok(trans2quik_result)
+    }
+
+
+    /// Синхронная отправка транзакции. При синхронной отправке возврат из функции происходит 
+    /// только после получения результата выполнения транзакции, либо после разрыва связи 
+    /// терминала QUIK с сервером.
+    pub fn send_sync_transaction(&self, transaction_str: &str) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+        let transaction_str = CString::new(transaction_str).expect("CString::new failed");
+        let mut reply_code: c_long = 0;
+        let mut trans_id: c_ulong = 0;
+        let mut order_num: c_double = 0.0;
+        let mut result_message = vec![0 as c_char; 256];
+        let mut error_code: c_long = 0;
+        let mut error_message = vec![0 as c_char; 256];
+
+        let function_result = unsafe {
+            (self.trans2quik_send_sync_transaction)(
+                transaction_str.as_ptr(),
+                &mut reply_code as &mut c_long,
+                &mut trans_id as &mut c_ulong,
+                &mut order_num as &mut c_double,
+                result_message.as_mut_ptr(),
+                result_message.len() as c_ulong,
+                &mut error_code as &mut c_long,
+                error_message.as_mut_ptr(),
+                error_message.len() as c_ulong,
+            )
+        };
+
+        let result_message = unsafe {
+            CStr::from_ptr(result_message.as_ptr())
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        let error_message = unsafe {
+            CStr::from_ptr(error_message.as_ptr())
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        let trans2quik_result = Trans2quikResult::from(function_result);
+
+        info!("TRANS2QUIK_SEND_SYNC_TRANSACTION -> {:?}, reply_code: {}, trans_id: {}, order_num: {}, result_message: {}, error_code: {}, error_message: {}",
+            trans2quik_result,
+            reply_code,
+            trans_id,
+            order_num,
+            result_message,
+            error_code,
+            error_message,
+        );
+
         Ok(trans2quik_result)
     }
 }
