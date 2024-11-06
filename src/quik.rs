@@ -18,7 +18,7 @@ type Trans2QuikConnectionStatusCallback = unsafe extern "C" fn(
     connection_event: *mut c_long,
     error_code: *mut c_long,
     error_message: *mut c_char,
-) -> c_void;
+);
 
 
 /// Corresponds to the description of constants whose values are returned when exiting functions
@@ -130,11 +130,8 @@ pub struct Terminal {
     /// Calling a function from the library Trans2QUIK.dll to check if there is a connection between the library Trans2QUIK.dll and the QUIK terminal.
     trans2quik_is_dll_connected: unsafe extern "C" fn(*mut c_long, *mut c_char, c_ulong) -> c_long,
 
-    /// Prototype of a callback function for status monitoring connections.
-    trans2quik_connection_status_callback: unsafe extern "C" fn(*mut c_long, *mut c_long, *mut c_char) -> c_void,
-
     /// А callback function for processing the received connection information.
-    trans2quik_set_connection_status_callback: unsafe extern "C" fn(*mut Trans2QuikConnectionStatusCallback, *mut c_long, *mut c_char, c_ulong) -> c_long,
+    trans2quik_set_connection_status_callback: unsafe extern "C" fn(Trans2QuikConnectionStatusCallback, *mut c_long, *mut c_char, c_ulong) -> c_long,
 }
 
 
@@ -173,16 +170,9 @@ impl Terminal {
             c_ulong,
         ) -> c_long>(&library, b"TRANS2QUIK_IS_DLL_CONNECTED\0")?;
 
-        // Prototype of a callback function for status monitoring connections.
-        let trans2quik_connection_status_callback = load_symbol::<unsafe extern "C" fn(
-            *mut c_long,
-            *mut c_long,
-            *mut c_char,
-        ) -> c_void>(&library, b"TRANS2QUIK_CONNECTION_STATUS_CALLBACK\0")?;
-
         // А callback function for processing the received connection information.
         let trans2quik_set_connection_status_callback = load_symbol::<unsafe extern "C" fn(
-            *mut Trans2QuikConnectionStatusCallback,
+            Trans2QuikConnectionStatusCallback,
             *mut c_long,
             *mut c_char,
             c_ulong,
@@ -194,7 +184,7 @@ impl Terminal {
             trans2quik_disconnect,
             trans2quik_is_quik_connected,
             trans2quik_is_dll_connected,
-            trans2quik_connection_status_callback,
+            // trans2quik_connection_status_callback,
             trans2quik_set_connection_status_callback,
         })
     }
@@ -226,7 +216,7 @@ impl Terminal {
                 .into_owned()
         };
         let trans2quik_result = Trans2quikResult::from(function_result);
-        println!(
+        info!(
             "{} -> {:?} {}",
             function_name, trans2quik_result, error_message
         );
@@ -301,38 +291,6 @@ impl Terminal {
     }
 
 
-    /// Prototype of a callback function for status monitoring connections.
-    pub fn connection_status_callback(&self) -> c_void {
-        let mut connection_event: c_long = 0;
-        let mut error_code: c_long = 0;
-        let mut error_message = vec![0 as c_char; 256];
-
-        // Вызов функции
-        let function_result = unsafe {
-            (self.trans2quik_connection_status_callback)(
-                &mut connection_event as *mut c_long,
-                &mut error_code as *mut c_long,
-                error_message.as_mut_ptr(),
-            )
-        };
-
-        let error_message = unsafe {
-            CStr::from_ptr(error_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
-        };
-
-        // let trans2quik_result = Trans2quikResult::from(function_result);
-
-        info!(
-            "TRANS2QUIK_CONNECTION_STATUS_CALLBACK -> {} {} {}",
-            connection_event, error_code, error_message
-        );
-
-        function_result
-    }
-
-
     /// А callback function for processing the received connection information.
     pub fn set_connection_status_callback(&mut self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         let mut error_code: c_long = 0;
@@ -342,7 +300,7 @@ impl Terminal {
         // Вызов функции
         let function_result = unsafe {
             (self.trans2quik_set_connection_status_callback)(
-                &mut self.trans2quik_connection_status_callback,
+                connection_status_callback,
                 &mut error_code,
                 error_message.as_mut_ptr(),
                 error_message_len,
@@ -356,11 +314,16 @@ impl Terminal {
         };
 
         let trans2quik_result = Trans2quikResult::from(function_result);
-        println!(
-            "TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK -> {:?} {}",
-            trans2quik_result, error_message
+        info!(
+            "TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK -> {:?} {} {}",
+            trans2quik_result, error_code, error_message
         );
         Ok(trans2quik_result)
     }
+}
 
+
+/// Prototype of a callback function for status monitoring connections.
+unsafe extern "C" fn connection_status_callback(connection_event: *mut c_long, error_code: *mut c_long, error_message: *mut c_char) {
+    info!("event: {:?}", connection_event);
 }
