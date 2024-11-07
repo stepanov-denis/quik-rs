@@ -1,14 +1,12 @@
-use ta::DataItem;
-use ta::{Open, High, Low, Close, Volume};
-use ta::indicators::ExponentialMovingAverage;
-use ta::Next;
 use crate::psql::DataForEma;
-
+use ta::indicators::ExponentialMovingAverage;
+use ta::DataItem;
+use ta::Next;
+use ta::{Close, High, Low, Open, Volume};
 
 pub struct Ema {
     trend: ExponentialMovingAverage,
 }
-
 
 impl Ema {
     pub fn calculate_ema(data_for_ema: Vec<DataForEma>) -> f64 {

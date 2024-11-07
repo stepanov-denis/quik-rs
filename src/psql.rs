@@ -1,19 +1,17 @@
 use chrono::{DateTime, Utc};
-use std::str::FromStr;
-use std::convert::TryInto;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+use std::convert::TryInto;
+use std::str::FromStr;
 
-
-use tokio;
-use tracing::{error, info};
 use bb8::RunError;
 use bb8_postgres::{
     bb8::Pool,
+    tokio_postgres::{Error, NoTls},
     PostgresConnectionManager,
-    tokio_postgres::{NoTls, Error},
 };
-
+use tokio;
+use tracing::{error, info};
 
 #[derive(Debug)]
 pub struct DataForEma {
@@ -24,15 +22,15 @@ pub struct DataForEma {
     pub volume: f64,
 }
 
-
 pub struct Db {
     pool: Pool<PostgresConnectionManager<NoTls>>,
 }
 
-
 impl Db {
     // Инициализация пула соединений
-    pub async fn new(connection_str: &str) -> Result<Self, RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn new(
+        connection_str: &str,
+    ) -> Result<Self, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Create the manager
         let manager = PostgresConnectionManager::new_from_stringlike(connection_str, NoTls)
             .map_err(|e| {
@@ -54,9 +52,10 @@ impl Db {
         Ok(Db { pool })
     }
 
-
     // Создание таблицы текущих торгов
-    pub async fn create_current_trades(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn create_current_trades(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Получаем соединение из пула
         let conn = self.pool.get().await.map_err(|e| {
             error!("Ошибка получения соединения из пула: {:?}", e);
@@ -84,16 +83,20 @@ impl Db {
 
         // Выполняем команду создания таблицы
         conn.execute(query, &[]).await.map_err(|e| {
-            error!("Ошибка выполнения запроса создания таблицы current_trades: {:?}", e);
+            error!(
+                "Ошибка выполнения запроса создания таблицы current_trades: {:?}",
+                e
+            );
             e
         })?;
 
         Ok(())
     }
 
-
     // Создание таблицы исторических данных торгов
-    pub async fn create_historical_trades(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn create_historical_trades(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Получаем соединение из пула
         let conn = self.pool.get().await.map_err(|e| {
             error!("Ошибка получения соединения из пула: {:?}", e);
@@ -123,16 +126,20 @@ impl Db {
 
         // Выполняем команду создания таблицы
         conn.execute(query, &[]).await.map_err(|e| {
-            error!("Ошибка выполнения запроса создания таблицы historical_trades: {:?}", e);
+            error!(
+                "Ошибка выполнения запроса создания таблицы historical_trades: {:?}",
+                e
+            );
             e
         })?;
 
         Ok(())
     }
 
-
     // Функция триггера, которая будет вставлять данные в таблицу historical_trades
-    pub async fn insert_into_historical(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn insert_into_historical(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Получаем соединение из пула
         let conn = self.pool.get().await.map_err(|e| {
             error!("Ошибка получения соединения из пула: {:?}", e);
@@ -187,9 +194,10 @@ impl Db {
         Ok(())
     }
 
-
     // Триггер, который будет срабатывать перед обновлением данных в таблице current_trades
-    pub async fn before_update_current_trades(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn before_update_current_trades(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Получаем соединение из пула
         let conn = self.pool.get().await.map_err(|e| {
             error!("Ошибка получения соединения из пула: {:?}", e);
@@ -215,7 +223,10 @@ impl Db {
 
         // Выполняем команду создания триггера
         conn.execute(query, &[]).await.map_err(|e| {
-            error!("Ошибка выполнения запроса создания триггера before_update_current_trades: {:?}", e);
+            error!(
+                "Ошибка выполнения запроса создания триггера before_update_current_trades: {:?}",
+                e
+            );
             e
         })?;
 
@@ -228,13 +239,17 @@ impl Db {
         self.create_historical_trades().await?;
         self.insert_into_historical().await?;
         self.before_update_current_trades().await?;
-        
+
         Ok(())
     }
 
-
     // Получение данных торгов для расчета EMA
-    pub async fn get_data_for_ema(&self, instrument_code: &str, lookback_interval_seconds: f64, period_length_seconds: f64) -> Result<Vec<DataForEma>, RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn get_data_for_ema(
+        &self,
+        instrument_code: &str,
+        lookback_interval_seconds: f64,
+        period_length_seconds: f64,
+    ) -> Result<Vec<DataForEma>, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Получаем соединение из пула
         let conn = self.pool.get().await.map_err(|e| {
             error!("Ошибка получения соединения из пула: {:?}", e);
@@ -272,12 +287,22 @@ impl Db {
 
         // Выполняем запрос с параметрами
         let rows = conn
-            .query(query, &[&period_length_seconds, &lookback_interval_seconds, &instrument_code])
-            .await.map_err(|e| {
-                error!("Ошибка выполнения запроса получения данных для расчета EMA: {:?}", e);
+            .query(
+                query,
+                &[
+                    &period_length_seconds,
+                    &lookback_interval_seconds,
+                    &instrument_code,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Ошибка выполнения запроса получения данных для расчета EMA: {:?}",
+                    e
+                );
                 e
             })?;
-        
 
         // Печатаем названия столбцов
         println!(
@@ -286,7 +311,10 @@ impl Db {
         );
 
         // Печатаем разделительную линию
-        println!("{:-<30}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-", "", "", "", "", "", "");
+        println!(
+            "{:-<30}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-",
+            "", "", "", "", "", ""
+        );
 
         // Создаем вектор для DataItem
         let mut data_item: Vec<DataForEma> = Vec::new();
@@ -295,39 +323,39 @@ impl Db {
         for row in rows {
             let period_start: DateTime<Utc> = row.get("period_start");
 
-            let open_price: f64 = row.try_get::<_, Decimal>("open_price")
+            let open_price: f64 = row
+                .try_get::<_, Decimal>("open_price")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let close_price: f64 = row.try_get::<_, Decimal>("close_price")
+            let close_price: f64 = row
+                .try_get::<_, Decimal>("close_price")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let min_price: f64 = row.try_get::<_, Decimal>("min_price")
+            let min_price: f64 = row
+                .try_get::<_, Decimal>("min_price")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let max_price: f64 = row.try_get::<_, Decimal>("max_price")
+            let max_price: f64 = row
+                .try_get::<_, Decimal>("max_price")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let period_volume: f64 = row.try_get::<_, Decimal>("period_volume")
+            let period_volume: f64 = row
+                .try_get::<_, Decimal>("period_volume")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
             println!(
                 "{:<30} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6}",
-                period_start,
-                open_price,
-                close_price,
-                min_price,
-                max_price,
-                period_volume
+                period_start, open_price, close_price, min_price, max_price, period_volume
             );
 
             let item = DataForEma {
@@ -340,7 +368,7 @@ impl Db {
 
             data_item.push(item);
         }
-    
+
         Ok(data_item)
     }
 }
