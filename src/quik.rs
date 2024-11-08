@@ -5,8 +5,10 @@ use libloading::{Library, Symbol};
 use rust_decimal::prelude::ToPrimitive;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::str;
+use std::{error, str};
 use tracing::{error, info};
+
+use crate::trader::transaction;
 
 type SubsribeOrders = unsafe extern "C" fn(*const c_char, *const c_char) -> c_long;
 
@@ -26,8 +28,8 @@ type Trans2QuikTransactionReplyCallback = unsafe extern "C" fn(
     reply_code: c_long,
     trans_id: c_long,
     order_num: c_ulonglong,
-    error_message: *mut c_char,
-    trans_reply_descriptor: *mut intptr_t,
+    error_message_ptr: *mut c_char,
+    trans_reply_descriptor_ptr: *mut intptr_t,
 );
 
 /// Corresponds to the description of constants whose values are returned when exiting functions
@@ -145,14 +147,14 @@ pub struct Terminal {
     /// только после получения результата выполнения транзакции, либо после разрыва связи
     /// терминала QUIK с сервером.
     trans2quik_send_sync_transaction: unsafe extern "C" fn(
-        trans_str: *const c_char,
-        reply_code: *mut c_long,
-        trans_id: *mut c_long,
-        order_num: *mut c_double,
-        result_message: *mut c_char,
+        trans_str_ptr: *const c_char,
+        reply_code_ptr: *mut c_long,
+        trans_id_ptr: *mut c_long,
+        order_num_ptr: *mut c_double,
+        result_message_ptr: *mut c_char,
         result_message_len: c_long,
-        error_code: *mut c_long,
-        error_message: *mut c_char,
+        error_code_ptr: *mut c_long,
+        error_message_ptr: *mut c_char,
         error_message_len: c_long,
     ) -> c_long,
 
@@ -242,7 +244,7 @@ impl Terminal {
                 ) -> c_long,
             >(&library, b"TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK\0")?;
 
-        /// Устанавливает функцию обратного вызова для получения информации об отправленной асинхронной транзакции.
+        // Устанавливает функцию обратного вызова для получения информации об отправленной асинхронной транзакции.
         let trans2quik_set_transactions_reply_callback =
             load_symbol::<
                 unsafe extern "C" fn(
@@ -273,27 +275,33 @@ impl Terminal {
         func: F,
     ) -> Result<Trans2quikResult, Box<dyn std::error::Error>>
     where
-        F: FnOnce(&mut c_long, *mut c_char, c_long) -> c_long,
+        F: FnOnce(*mut c_long, *mut c_char, c_long) -> c_long,
     {
         let mut error_code: c_long = 0;
+        let error_code_ptr = &mut error_code as *mut c_long;
+
         let mut error_message = vec![0 as c_char; 256];
+        let error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         // Вызов функции
         let function_result = func(
-            &mut error_code,
-            error_message.as_mut_ptr(),
+            error_code_ptr,
+            error_message_ptr,
             error_message.len() as c_long,
         );
 
-        let error_message = unsafe {
-            CStr::from_ptr(error_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
+        let error_message = match extract_string_from_vec(error_message) {
+            Ok(message) => message,
+            Err(e) => {
+                error!("Warning: Error message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error message")
+            }
         };
 
         let trans2quik_result = Trans2quikResult::from(function_result);
+
         info!(
-            "{} -> {:?}, error_code: {}, error_message: {}",
+            "{} -> {:?}, error_code: {}, error_message: {:?}",
             function_name, trans2quik_result, error_code, error_message
         );
         Ok(trans2quik_result)
@@ -301,15 +309,16 @@ impl Terminal {
 
     /// The function is used to establish communication with the QUIK terminal.
     pub fn connect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let connection_string = CString::new(r"c:\QUIK Junior")?;
+        let connection_str = CString::new(r"c:\QUIK Junior")?;
+        let connection_str_ptr = connection_str.as_ptr() as *const c_char;
 
-        let function = |error_code: &mut c_long,
-                        error_message: *mut c_char,
+        let function = |error_code_ptr: *mut c_long,
+                        error_message_ptr: *mut c_char,
                         error_message_len: c_long| unsafe {
             (self.trans2quik_connect)(
-                connection_string.as_ptr(),
-                error_code,
-                error_message,
+                connection_str_ptr,
+                error_code_ptr,
+                error_message_ptr,
                 error_message_len,
             )
         };
@@ -319,7 +328,7 @@ impl Terminal {
 
     /// The function is used to disconnect from the QUIK terminal.
     pub fn disconnect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let function = |error_code: &mut c_long,
+        let function = |error_code: *mut c_long,
                         error_message: *mut c_char,
                         error_message_len: c_long| unsafe {
             (self.trans2quik_disconnect)(error_code, error_message, error_message_len)
@@ -330,7 +339,7 @@ impl Terminal {
 
     /// The function is used to check if there is a connection between the QUIK terminal and the server.
     pub fn is_quik_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let function = |error_code: &mut c_long,
+        let function = |error_code: *mut c_long,
                         error_message: *mut c_char,
                         error_message_len: c_long| unsafe {
             (self.trans2quik_is_quik_connected)(error_code, error_message, error_message_len)
@@ -341,7 +350,7 @@ impl Terminal {
 
     /// Checking for a connection between the library Trans2QUIK.dll and the QUIK terminal.
     pub fn is_dll_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let function = |error_code: &mut c_long,
+        let function = |error_code: *mut c_long,
                         error_message: *mut c_char,
                         error_message_len: c_long| unsafe {
             (self.trans2quik_is_dll_connected)(error_code, error_message, error_message_len)
@@ -357,38 +366,55 @@ impl Terminal {
         &self,
         transaction_str: &str,
     ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let transaction_str = CString::new(transaction_str).expect("CString::new failed");
+        let trans_str = CString::new(transaction_str).expect("CString::new failed");
+        let trans_str_ptr = trans_str.as_ptr() as *const c_char;
+
         let mut reply_code: c_long = 0;
+        let mut reply_code_ptr = &mut reply_code as *mut c_long;
+        
         let mut trans_id: c_long = 0;
+        let mut trans_id_ptr = &mut trans_id as *mut c_long;
+
         let mut order_num: c_double = 0.0;
+        let mut order_num_ptr = &mut order_num as *mut c_double;
+
         let mut result_message = vec![0 as c_char; 256];
+        let mut result_message_ptr = result_message.as_mut_ptr() as *mut c_char;
+
         let mut error_code: c_long = 0;
+        let mut error_code_ptr = &mut error_code as *mut c_long;
+
         let mut error_message = vec![0 as c_char; 256];
+        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_send_sync_transaction)(
-                transaction_str.as_ptr(),
-                &mut reply_code as &mut c_long,
-                &mut trans_id as &mut c_long,
-                &mut order_num as &mut c_double,
-                result_message.as_mut_ptr(),
+                trans_str_ptr,
+                reply_code_ptr,
+                trans_id_ptr,
+                order_num_ptr,
+                result_message_ptr,
                 result_message.len() as c_long,
-                &mut error_code as &mut c_long,
-                error_message.as_mut_ptr(),
+                error_code_ptr,
+                error_message_ptr,
                 error_message.len() as c_long,
             )
         };
 
-        let result_message = unsafe {
-            CStr::from_ptr(result_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
+        let result_message = match extract_string_from_vec(result_message) {
+            Ok(message) => message,
+            Err(e) => {
+                error!("Warning: Error message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error message")
+            }
         };
 
-        let error_message = unsafe {
-            CStr::from_ptr(error_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
+        let error_message = match extract_string_from_vec(error_message) {
+            Ok(message) => message,
+            Err(e) => {
+                error!("Warning: Error message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error message")
+            }
         };
 
         let trans2quik_result = Trans2quikResult::from(function_result);
@@ -413,23 +439,30 @@ impl Terminal {
         &self,
         transaction_str: &str,
     ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
-        let transaction_str = CString::new(transaction_str).expect("CString::new failed");
+        let trans_str = CString::new(transaction_str).expect("CString::new failed");
+        let trans_str_ptr =trans_str.as_ptr() as *const c_char;
+
         let mut error_code: c_long = 0;
+        let mut error_code_ptr = &mut error_code as *mut c_long;
+
         let mut error_message = vec![0 as c_char; 256];
+        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_send_async_transaction)(
-                transaction_str.as_ptr(),
-                &mut error_code as &mut c_long,
-                error_message.as_mut_ptr(),
+                trans_str_ptr,
+                error_code_ptr,
+                error_message_ptr,
                 error_message.len() as c_long,
             )
         };
 
-        let error_message = unsafe {
-            CStr::from_ptr(error_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
+        let error_message = match extract_string_from_vec(error_message) {
+            Ok(message) => message,
+            Err(e) => {
+                error!("Warning: Error message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error message")
+            }
         };
 
         let trans2quik_result = Trans2quikResult::from(function_result);
@@ -447,21 +480,26 @@ impl Terminal {
         &self,
     ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         let mut error_code: c_long = 0;
+        let mut error_code_ptr = &mut error_code as *mut c_long;
+
         let mut error_message = vec![0 as c_char; 256];
+        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_set_connection_status_callback)(
                 connection_status_callback,
-                &mut error_code,
-                error_message.as_mut_ptr(),
+                error_code_ptr,
+                error_message_ptr,
                 error_message.len() as c_long,
             )
         };
 
-        let error_message = unsafe {
-            CStr::from_ptr(error_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
+        let error_message = match extract_string_from_vec(error_message) {
+            Ok(message) => message,
+            Err(e) => {
+                error!("Warning: Error message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error message")
+            }
         };
 
         let trans2quik_result = Trans2quikResult::from(function_result);
@@ -478,21 +516,26 @@ impl Terminal {
         &self,
     ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         let mut error_code: c_long = 0;
+        let mut error_code_ptr = &mut error_code as *mut c_long;
+
         let mut error_message = vec![0 as c_char; 256];
+        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_set_transactions_reply_callback)(
                 transaction_reply_callback,
-                &mut error_code,
-                error_message.as_mut_ptr(),
+                error_code_ptr,
+                error_message_ptr,
                 error_message.len() as c_long,
             )
         };
 
-        let error_message = unsafe {
-            CStr::from_ptr(error_message.as_ptr())
-                .to_string_lossy()
-                .into_owned()
+        let error_message = match extract_string_from_vec(error_message) {
+            Ok(message) => message,
+            Err(e) => {
+                error!("Warning: Error message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error message")
+            }
         };
 
         let trans2quik_result = Trans2quikResult::from(function_result);
@@ -506,22 +549,38 @@ impl Terminal {
     }
 }
 
+
+/// Extract String from Vec<i8>.
+fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, std::string::FromUtf8Error> {
+    // Преобразуем Vec<i8> в Vec<u8>
+    let vec_u8: Vec<u8> = vec_i8.into_iter().map(|byte| byte as u8).collect();
+
+    // Находим позицию первого нулевого байта (если он есть)
+    let null_pos = vec_u8.iter().position(|&byte| byte == 0).unwrap_or(vec_u8.len());
+
+    // Создаем срез вектора до первого нулевого байта
+    let vec_u8_trimmed = &vec_u8[..null_pos];
+
+    // Преобразуем обрезанный вектор в String
+    let s = String::from_utf8(vec_u8_trimmed.to_vec())?;
+
+    Ok(s)
+}
+
+
 /// Prototype of a callback function for status monitoring connections.
 unsafe extern "C" fn connection_status_callback(
     connection_event: c_long,
     error_code: c_long,
     error_message: *mut c_char,
 ) {
-    // let error_message = unsafe {
-    //     CStr::from_ptr(error_message)
-    //         .to_string_lossy()
-    //         .into_owned()
-    // };
-
-    let error_message = if error_message.is_null() {
-        String::new()
-    } else {
-        CStr::from_ptr(error_message).to_string_lossy().into_owned()
+    let error_message = match unsafe { CStr::from_ptr(error_message).to_str() } {
+        Ok(valid_str) => valid_str.to_owned(),
+        Err(e) => {
+            // Handle UTF-8 conversion issue
+            error!("Warning: Error message contains invalid UTF-8: {}", e);
+            String::from("Invalid UTF-8 in error message")
+        }
     };
 
     let trans2quik_result = Trans2quikResult::from(connection_event);
@@ -547,7 +606,14 @@ unsafe extern "C" fn transaction_reply_callback(
     error_message: *mut c_char,
     trans_reply_descriptor: *mut intptr_t,
 ) {
-    let error_message = unsafe { CStr::from_ptr(error_message).to_string_lossy().into_owned() };
+    let error_message = match unsafe { CStr::from_ptr(error_message).to_str() } {
+        Ok(valid_str) => valid_str.to_owned(),
+        Err(e) => {
+            // Handle UTF-8 conversion issue
+            error!("Warning: Error message contains invalid UTF-8: {}", e);
+            String::from("Invalid UTF-8 in error message")
+        }
+    };
 
     let trans2quik_result = Trans2quikResult::from(result_code);
 
