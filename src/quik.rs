@@ -371,7 +371,7 @@ impl Terminal {
 
         let mut reply_code: c_long = 0;
         let mut reply_code_ptr = &mut reply_code as *mut c_long;
-        
+
         let mut trans_id: c_long = 0;
         let mut trans_id_ptr = &mut trans_id as *mut c_long;
 
@@ -440,7 +440,7 @@ impl Terminal {
         transaction_str: &str,
     ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
         let trans_str = CString::new(transaction_str).expect("CString::new failed");
-        let trans_str_ptr =trans_str.as_ptr() as *const c_char;
+        let trans_str_ptr = trans_str.as_ptr() as *const c_char;
 
         let mut error_code: c_long = 0;
         let mut error_code_ptr = &mut error_code as *mut c_long;
@@ -549,14 +549,16 @@ impl Terminal {
     }
 }
 
-
 /// Extract String from Vec<i8>.
 fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, std::string::FromUtf8Error> {
     // Преобразуем Vec<i8> в Vec<u8>
     let vec_u8: Vec<u8> = vec_i8.into_iter().map(|byte| byte as u8).collect();
 
     // Находим позицию первого нулевого байта (если он есть)
-    let null_pos = vec_u8.iter().position(|&byte| byte == 0).unwrap_or(vec_u8.len());
+    let null_pos = vec_u8
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(vec_u8.len());
 
     // Создаем срез вектора до первого нулевого байта
     let vec_u8_trimmed = &vec_u8[..null_pos];
@@ -566,7 +568,6 @@ fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, std::string::FromU
 
     Ok(s)
 }
-
 
 /// Prototype of a callback function for status monitoring connections.
 unsafe extern "C" fn connection_status_callback(
