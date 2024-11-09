@@ -1,27 +1,21 @@
-use libc;
+#![allow(dead_code)]
 use libc::{c_char, c_double, c_long, c_ulonglong, intptr_t};
-use libloading;
 use libloading::{Library, Symbol};
-use rust_decimal::prelude::ToPrimitive;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::{error, str};
+use std::str;
 use tracing::{error, info};
-
-use crate::trader::transaction;
-
-type SubsribeOrders = unsafe extern "C" fn(*const c_char, *const c_char) -> c_long;
 
 /// Prototype of a callback function for status monitoring connections.
 type Trans2QuikConnectionStatusCallback =
     unsafe extern "C" fn(connection_event: c_long, error_code: c_long, error_message: *mut c_char);
 
-/// Прототип функции обратного вызова для обработки полученной информации о транзакции.
-/// Внимание! Подача асинхронных транзакций с использованием функции
-/// обратного вызова и синхронных транзакций одновременно запрещена.
-/// Это связано с тем, что невозможно корректно вызвать функцию обратного
-/// вызова в момент, когда функция обработки синхронной транзакции еще
-/// не закончила свою работу.
+/// A prototype of the callback function for processing the received transaction information.
+/// Attention! The submission of asynchronous transactions using
+/// the callback function and synchronous transactions at the same time is prohibited.
+/// This is due to the fact that it is impossible to correctly call
+/// the callback function at a time when the synchronous transaction processing function has
+/// not finished its work yet.
 type Trans2QuikTransactionReplyCallback = unsafe extern "C" fn(
     result_code: c_long,
     error_code: c_long,
@@ -53,7 +47,7 @@ type Trans2QuikTransactionReplyCallback = unsafe extern "C" fn(
 /// ```
 #[derive(Debug)]
 #[repr(i32)]
-pub enum Trans2quikResult {
+pub enum Trans2QuikResult {
     Success = 0,
     Failed = 1,
     TerminalNotFound = 2,
@@ -72,27 +66,27 @@ pub enum Trans2quikResult {
     Unknown,
 }
 
-/// Implementation From<c_long> for Trans2quikResult,
+/// Implementation From<c_long> for Trans2QuikResult,
 /// to automatically convert the integer code to the appropriate enumeration variant:
-impl From<c_long> for Trans2quikResult {
+impl From<c_long> for Trans2QuikResult {
     fn from(code: c_long) -> Self {
         match code {
-            0 => Trans2quikResult::Success,
-            1 => Trans2quikResult::Failed,
-            2 => Trans2quikResult::TerminalNotFound,
-            3 => Trans2quikResult::DllVersionNotSupported,
-            4 => Trans2quikResult::AlreadyConnectedToQuik,
-            5 => Trans2quikResult::WrongSyntax,
-            6 => Trans2quikResult::QuikNotConnected,
-            7 => Trans2quikResult::DllNotConnected,
-            8 => Trans2quikResult::QuikConnected,
-            9 => Trans2quikResult::QuikDisconnected,
-            10 => Trans2quikResult::DllConnected,
-            11 => Trans2quikResult::DllDisconnected,
-            12 => Trans2quikResult::MemoryAllocationError,
-            13 => Trans2quikResult::WrongConnectionHandle,
-            14 => Trans2quikResult::WrongInputParams,
-            _ => Trans2quikResult::Unknown,
+            0 => Trans2QuikResult::Success,
+            1 => Trans2QuikResult::Failed,
+            2 => Trans2QuikResult::TerminalNotFound,
+            3 => Trans2QuikResult::DllVersionNotSupported,
+            4 => Trans2QuikResult::AlreadyConnectedToQuik,
+            5 => Trans2QuikResult::WrongSyntax,
+            6 => Trans2QuikResult::QuikNotConnected,
+            7 => Trans2QuikResult::DllNotConnected,
+            8 => Trans2QuikResult::QuikConnected,
+            9 => Trans2QuikResult::QuikDisconnected,
+            10 => Trans2QuikResult::DllConnected,
+            11 => Trans2QuikResult::DllDisconnected,
+            12 => Trans2QuikResult::MemoryAllocationError,
+            13 => Trans2QuikResult::WrongConnectionHandle,
+            14 => Trans2QuikResult::WrongInputParams,
+            _ => Trans2QuikResult::Unknown,
         }
     }
 }
@@ -143,9 +137,9 @@ pub struct Terminal {
     /// Calling a function from the library Trans2QUIK.dll to check if there is a connection between the library Trans2QUIK.dll and the QUIK terminal.
     trans2quik_is_dll_connected: unsafe extern "C" fn(*mut c_long, *mut c_char, c_long) -> c_long,
 
-    /// Синхронная отправка транзакции. При синхронной отправке возврат из функции происходит
-    /// только после получения результата выполнения транзакции, либо после разрыва связи
-    /// терминала QUIK с сервером.
+    /// Sending a transaction synchronously. When sending synchronously, the return from the function occurs
+    /// only after receiving the result of the transaction, or after disconnecting the
+    /// QUIK terminal from the server.
     trans2quik_send_sync_transaction: unsafe extern "C" fn(
         trans_str_ptr: *const c_char,
         reply_code_ptr: *mut c_long,
@@ -158,9 +152,9 @@ pub struct Terminal {
         error_message_len: c_long,
     ) -> c_long,
 
-    /// Асинхронная передача транзакции. При отправке асинхронной транзакции возврат
-    /// из функции происходит сразу же, а результат выполнения транзакции сообщается через
-    /// соответствующую функцию обратного вызова.
+    /// Asynchronous transfer of a transaction. When sending an asynchronous transaction, the refund is
+    /// the function is executed immediately, and the result of the transaction is reported via
+    /// the corresponding callback function.
     trans2quik_send_async_transaction:
         unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_long) -> c_long,
 
@@ -172,7 +166,7 @@ pub struct Terminal {
         c_long,
     ) -> c_long,
 
-    /// Устанавливает функцию обратного вызова для получения информации об отправленной асинхронной транзакции.
+    /// Sets the callback function to receive information about the sent asynchronous transaction.
     trans2quik_set_transactions_reply_callback: unsafe extern "C" fn(
         Trans2QuikTransactionReplyCallback,
         *mut c_long,
@@ -207,9 +201,9 @@ impl Terminal {
             unsafe extern "C" fn(*mut c_long, *mut c_char, c_long) -> c_long,
         >(&library, b"TRANS2QUIK_IS_DLL_CONNECTED\0")?;
 
-        // Синхронная отправка транзакции. При синхронной отправке возврат из функции происходит
-        // только после получения результата выполнения транзакции, либо после разрыва связи
-        // терминала QUIK с сервером.
+        // Sending a transaction synchronously. When sending synchronously, the return from the function occurs
+        // only after receiving the result of the transaction, or after disconnecting the
+        // QUIK terminal from the server.
         let trans2quik_send_sync_transaction =
             load_symbol::<
                 unsafe extern "C" fn(
@@ -225,9 +219,9 @@ impl Terminal {
                 ) -> c_long,
             >(&library, b"TRANS2QUIK_SEND_SYNC_TRANSACTION\0")?;
 
-        // Асинхронная передача транзакции. При отправке асинхронной транзакции возврат
-        // из функции происходит сразу же, а результат выполнения транзакции сообщается через
-        // соответствующую функцию обратного вызова.
+        // Asynchronous transfer of a transaction. When sending an asynchronous transaction, the refund is
+        // the function is executed immediately, and the result of the transaction is reported via
+        // the corresponding callback function.
         let trans2quik_send_async_transaction =
             load_symbol::<
                 unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_long) -> c_long,
@@ -244,7 +238,7 @@ impl Terminal {
                 ) -> c_long,
             >(&library, b"TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK\0")?;
 
-        // Устанавливает функцию обратного вызова для получения информации об отправленной асинхронной транзакции.
+        // Sets the callback function to receive information about the sent asynchronous transaction.
         let trans2quik_set_transactions_reply_callback =
             load_symbol::<
                 unsafe extern "C" fn(
@@ -273,7 +267,7 @@ impl Terminal {
         &self,
         function_name: &str,
         func: F,
-    ) -> Result<Trans2quikResult, Box<dyn std::error::Error>>
+    ) -> Result<Trans2QuikResult, Box<dyn std::error::Error>>
     where
         F: FnOnce(*mut c_long, *mut c_char, c_long) -> c_long,
     {
@@ -298,17 +292,17 @@ impl Terminal {
             }
         };
 
-        let trans2quik_result = Trans2quikResult::from(function_result);
+        let trans2quik_result = Trans2QuikResult::from(function_result);
 
         info!(
-            "{} -> {:?}, error_code: {}, error_message: {:?}",
+            "{} -> {:?}, error_code: {}, error_message: {}",
             function_name, trans2quik_result, error_code, error_message
         );
         Ok(trans2quik_result)
     }
 
     /// The function is used to establish communication with the QUIK terminal.
-    pub fn connect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    pub fn connect(&self) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let connection_str = CString::new(r"c:\QUIK Junior")?;
         let connection_str_ptr = connection_str.as_ptr() as *const c_char;
 
@@ -327,7 +321,7 @@ impl Terminal {
     }
 
     /// The function is used to disconnect from the QUIK terminal.
-    pub fn disconnect(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    pub fn disconnect(&self) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let function = |error_code: *mut c_long,
                         error_message: *mut c_char,
                         error_message_len: c_long| unsafe {
@@ -338,7 +332,7 @@ impl Terminal {
     }
 
     /// The function is used to check if there is a connection between the QUIK terminal and the server.
-    pub fn is_quik_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    pub fn is_quik_connected(&self) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let function = |error_code: *mut c_long,
                         error_message: *mut c_char,
                         error_message_len: c_long| unsafe {
@@ -349,7 +343,7 @@ impl Terminal {
     }
 
     /// Checking for a connection between the library Trans2QUIK.dll and the QUIK terminal.
-    pub fn is_dll_connected(&self) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    pub fn is_dll_connected(&self) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let function = |error_code: *mut c_long,
                         error_message: *mut c_char,
                         error_message_len: c_long| unsafe {
@@ -359,33 +353,33 @@ impl Terminal {
         self.call_trans2quik_function("TRANS2QUIK_IS_DLL_CONNECTED", function)
     }
 
-    /// Синхронная отправка транзакции. При синхронной отправке возврат из функции происходит
-    /// только после получения результата выполнения транзакции, либо после разрыва связи
-    /// терминала QUIK с сервером.
+    /// Sending a transaction synchronously. When sending synchronously, the return from the function occurs
+    /// only after receiving the result of the transaction, or after disconnecting the
+    /// QUIK terminal from the server.
     pub fn send_sync_transaction(
         &self,
         transaction_str: &str,
-    ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    ) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let trans_str = CString::new(transaction_str).expect("CString::new failed");
         let trans_str_ptr = trans_str.as_ptr() as *const c_char;
 
         let mut reply_code: c_long = 0;
-        let mut reply_code_ptr = &mut reply_code as *mut c_long;
+        let reply_code_ptr = &mut reply_code as *mut c_long;
 
         let mut trans_id: c_long = 0;
-        let mut trans_id_ptr = &mut trans_id as *mut c_long;
+        let trans_id_ptr = &mut trans_id as *mut c_long;
 
         let mut order_num: c_double = 0.0;
-        let mut order_num_ptr = &mut order_num as *mut c_double;
+        let order_num_ptr = &mut order_num as *mut c_double;
 
         let mut result_message = vec![0 as c_char; 256];
-        let mut result_message_ptr = result_message.as_mut_ptr() as *mut c_char;
+        let result_message_ptr = result_message.as_mut_ptr() as *mut c_char;
 
         let mut error_code: c_long = 0;
-        let mut error_code_ptr = &mut error_code as *mut c_long;
+        let error_code_ptr = &mut error_code as *mut c_long;
 
         let mut error_message = vec![0 as c_char; 256];
-        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
+        let error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_send_sync_transaction)(
@@ -417,7 +411,7 @@ impl Terminal {
             }
         };
 
-        let trans2quik_result = Trans2quikResult::from(function_result);
+        let trans2quik_result = Trans2QuikResult::from(function_result);
 
         info!("TRANS2QUIK_SEND_SYNC_TRANSACTION -> {:?}, reply_code: {}, trans_id: {}, order_num: {}, result_message: {}, error_code: {}, error_message: {}",
             trans2quik_result,
@@ -432,21 +426,21 @@ impl Terminal {
         Ok(trans2quik_result)
     }
 
-    /// Асинхронная передача транзакции. При отправке асинхронной транзакции возврат
-    /// из функции происходит сразу же, а результат выполнения транзакции сообщается через
-    /// соответствующую функцию обратного вызова.
+    /// Asynchronous transfer of a transaction. When sending an asynchronous transaction, the refund is
+    /// the function is executed immediately, and the result of the transaction is reported via
+    /// the corresponding callback function.
     pub fn send_async_transaction(
         &self,
         transaction_str: &str,
-    ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    ) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let trans_str = CString::new(transaction_str).expect("CString::new failed");
         let trans_str_ptr = trans_str.as_ptr() as *const c_char;
 
         let mut error_code: c_long = 0;
-        let mut error_code_ptr = &mut error_code as *mut c_long;
+        let error_code_ptr = &mut error_code as *mut c_long;
 
         let mut error_message = vec![0 as c_char; 256];
-        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
+        let error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_send_async_transaction)(
@@ -465,7 +459,7 @@ impl Terminal {
             }
         };
 
-        let trans2quik_result = Trans2quikResult::from(function_result);
+        let trans2quik_result = Trans2QuikResult::from(function_result);
 
         info!(
             "TRANS2QUIK_SEND_ASYNC_TRANSACTION -> {:?}, error_code: {}, error_message: {}",
@@ -478,12 +472,12 @@ impl Terminal {
     /// А callback function for processing the received connection information.
     pub fn set_connection_status_callback(
         &self,
-    ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    ) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let mut error_code: c_long = 0;
-        let mut error_code_ptr = &mut error_code as *mut c_long;
+        let error_code_ptr = &mut error_code as *mut c_long;
 
         let mut error_message = vec![0 as c_char; 256];
-        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
+        let error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_set_connection_status_callback)(
@@ -502,7 +496,7 @@ impl Terminal {
             }
         };
 
-        let trans2quik_result = Trans2quikResult::from(function_result);
+        let trans2quik_result = Trans2QuikResult::from(function_result);
         info!(
             "TRANS2QUIK_SET_CONNECTION_STATUS_CALLBACK -> {:?}, error_code: {}, error_message: {}",
             trans2quik_result, error_code, error_message
@@ -511,15 +505,15 @@ impl Terminal {
         Ok(trans2quik_result)
     }
 
-    /// Устанавливает функцию обратного вызова для получения информации об отправленной асинхронной транзакции.
+    /// Sets the callback function to receive information about the sent asynchronous transaction.
     pub fn set_transactions_reply_callback(
         &self,
-    ) -> Result<Trans2quikResult, Box<dyn std::error::Error>> {
+    ) -> Result<Trans2QuikResult, Box<dyn std::error::Error>> {
         let mut error_code: c_long = 0;
-        let mut error_code_ptr = &mut error_code as *mut c_long;
+        let error_code_ptr = &mut error_code as *mut c_long;
 
         let mut error_message = vec![0 as c_char; 256];
-        let mut error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
+        let error_message_ptr = error_message.as_mut_ptr() as *mut c_char;
 
         let function_result = unsafe {
             (self.trans2quik_set_transactions_reply_callback)(
@@ -538,7 +532,7 @@ impl Terminal {
             }
         };
 
-        let trans2quik_result = Trans2quikResult::from(function_result);
+        let trans2quik_result = Trans2QuikResult::from(function_result);
 
         info!(
             "TRANS2QUIK_SET_TRANSACTIONS_REPLY_CALLBACK -> {:?}, error_code: {}, error_message: {}",
@@ -551,19 +545,15 @@ impl Terminal {
 
 /// Extract String from Vec<i8>.
 fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, std::string::FromUtf8Error> {
-    // Преобразуем Vec<i8> в Vec<u8>
     let vec_u8: Vec<u8> = vec_i8.into_iter().map(|byte| byte as u8).collect();
 
-    // Находим позицию первого нулевого байта (если он есть)
     let null_pos = vec_u8
         .iter()
         .position(|&byte| byte == 0)
         .unwrap_or(vec_u8.len());
 
-    // Создаем срез вектора до первого нулевого байта
     let vec_u8_trimmed = &vec_u8[..null_pos];
 
-    // Преобразуем обрезанный вектор в String
     let s = String::from_utf8(vec_u8_trimmed.to_vec())?;
 
     Ok(s)
@@ -584,7 +574,7 @@ unsafe extern "C" fn connection_status_callback(
         }
     };
 
-    let trans2quik_result = Trans2quikResult::from(connection_event);
+    let trans2quik_result = Trans2QuikResult::from(connection_event);
 
     info!(
         "TRANS2QUIK_CONNECTION_STATUS_CALLBACK -> {:?}, error_code: {}, error_message: {}",
@@ -592,12 +582,12 @@ unsafe extern "C" fn connection_status_callback(
     );
 }
 
-/// Прототип функции обратного вызова для обработки полученной информации о транзакции.
-/// Внимание! Подача асинхронных транзакций с использованием функции
-/// обратного вызова и синхронных транзакций одновременно запрещена.
-/// Это связано с тем, что невозможно корректно вызвать функцию обратного
-/// вызова в момент, когда функция обработки синхронной транзакции еще
-/// не закончила свою работу.
+/// A prototype of the callback function for processing the received transaction information.
+/// Attention! The submission of asynchronous transactions using
+/// the callback function and synchronous transactions at the same time is prohibited.
+/// This is due to the fact that it is impossible to correctly call
+/// the callback function at a time when the synchronous transaction processing function has
+/// not finished its work yet.
 unsafe extern "C" fn transaction_reply_callback(
     result_code: c_long,
     error_code: c_long,
@@ -605,7 +595,7 @@ unsafe extern "C" fn transaction_reply_callback(
     trans_id: c_long,
     order_num: c_ulonglong,
     error_message: *mut c_char,
-    trans_reply_descriptor: *mut intptr_t,
+    _trans_reply_descriptor: *mut intptr_t,
 ) {
     let error_message = match unsafe { CStr::from_ptr(error_message).to_str() } {
         Ok(valid_str) => valid_str.to_owned(),
@@ -616,7 +606,7 @@ unsafe extern "C" fn transaction_reply_callback(
         }
     };
 
-    let trans2quik_result = Trans2quikResult::from(result_code);
+    let trans2quik_result = Trans2QuikResult::from(result_code);
 
     info!("TRANS2QUIK_TRANSACTION_REPLY_CALLBACK -> {:?}, error_code: {}, reply_code: {}, trans_id: {}, order_num: {}, error_message: {}", trans2quik_result, error_code, reply_code, trans_id, order_num, error_message);
 }

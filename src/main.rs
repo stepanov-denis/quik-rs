@@ -1,16 +1,14 @@
-use tracing::{error, info};
-use tracing_subscriber::{self, fmt::TestWriter};
+use tracing_subscriber::{self};
 mod ema;
 mod psql;
 mod quik;
-mod trader;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let path = r"c:\QUIK Junior\trans2quik.dll";
-    let mut terminal = quik::Terminal::new(path)?;
+    let terminal = quik::Terminal::new(path)?;
     terminal.connect()?;
     terminal.is_dll_connected()?;
     terminal.is_quik_connected()?;

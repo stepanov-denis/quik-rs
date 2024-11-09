@@ -1,17 +1,10 @@
+#![allow(dead_code)]
+use bb8::RunError;
+use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
 use chrono::{DateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use std::convert::TryInto;
-use std::str::FromStr;
-
-use bb8::RunError;
-use bb8_postgres::{
-    bb8::Pool,
-    tokio_postgres::{Error, NoTls},
-    PostgresConnectionManager,
-};
-use tokio;
-use tracing::{error, info};
+use tracing::error;
 
 #[derive(Debug)]
 pub struct DataForEma {

@@ -1,8 +1,8 @@
+#![allow(dead_code)]
 use crate::psql::DataForEma;
 use ta::indicators::ExponentialMovingAverage;
 use ta::DataItem;
 use ta::Next;
-use ta::{Close, High, Low, Open, Volume};
 
 pub struct Ema {
     trend: ExponentialMovingAverage,
