@@ -1,3 +1,37 @@
+//! # Importing transactions, entering orders into the QUIK ARQA Technologies trading system via the API.
+//!
+//! This functionality is designed to send transactions,
+//! the functionality is implemented through the API in the form of a library Trans2QUIK.dll .
+//!
+//! The library contains functions, when calling these functions, you can:
+//! * Establish or break the connection between the QUIK Workplace and the library 
+//! Trans2QUIK.dll
+//! * Check if there is a connection between the QUIK Workplace and the library 
+//! Trans2QUIK.dll and between the QUIK Workplace and the QUIK server.
+//! * Send the transaction.
+//! * Get information on applications and transactions.
+//!
+//! There are two ways to transfer transactions – synchronous and asynchronous, which
+//! are implemented by separate functions:
+//! * With synchronous transaction transfer, the function is exited only after
+//! receiving a response from the QUIK server. Therefore, synchronous transactions
+//! can only be sent sequentially, waiting for a response about each sent transaction –
+//! this method is simpler and more suitable for programmers with little
+//!software development experience.
+//! * With asynchronous transaction transfer, the function is exited immediately. 
+//! The callback function is used to receive a response about sent asynchronous transactions.
+//! The function is called every time a response
+//! is received about an executed or rejected transaction.
+//!
+//! A callback function is also provided to monitor connections between
+//! the QUIK terminal and the library Trans2QUIK.dll and between the QUIK Workplace
+//! and the QUIK server.
+//!
+//! To receive information about orders and transactions, the user must first 
+//! create a list of received instruments, separately for applications and transactions. Then 
+//! the procedure for obtaining information using the callback functions is started.
+//! Upon termination of receiving information on applications and transactions, the lists
+//! of received instruments are cleared.
 #![allow(dead_code)]
 use libc::{c_char, c_double, c_long, c_ulonglong, intptr_t};
 use libloading::{Library, Symbol};
@@ -543,7 +577,7 @@ impl Terminal {
     }
 }
 
-/// Extract String from Vec<i8>.
+/// Extract String from `Vec<i8>`.
 fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, std::string::FromUtf8Error> {
     let vec_u8: Vec<u8> = vec_i8.into_iter().map(|byte| byte as u8).collect();
 

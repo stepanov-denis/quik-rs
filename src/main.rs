@@ -1,3 +1,4 @@
+//! # Application for algorithmic trading on the MOEX via the QUIK terminal.
 use tracing_subscriber::{self};
 mod ema;
 mod psql;

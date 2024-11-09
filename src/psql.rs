@@ -1,3 +1,4 @@
+//! # It works with exchange data from the PostgreSQL DBMS.
 #![allow(dead_code)]
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};

@@ -1,3 +1,4 @@
+//! # Calculates the Exponential Moving Average (EMA), also known as an exponentially weighted moving average (EWMA).
 #![allow(dead_code)]
 use crate::psql::DataForEma;
 use ta::indicators::ExponentialMovingAverage;
