@@ -5,23 +5,23 @@
 //!
 //! The library contains functions, when calling these functions, you can:
 //! * Establish or break the connection between the QUIK Workplace and the library
-//! Trans2QUIK.dll
+//!   Trans2QUIK.dll
 //! * Check if there is a connection between the QUIK Workplace and the library
-//! Trans2QUIK.dll and between the QUIK Workplace and the QUIK server.
+//!   Trans2QUIK.dll and between the QUIK Workplace and the QUIK server.
 //! * Send the transaction.
 //! * Get information on applications and transactions.
 //!
 //! There are two ways to transfer transactions – synchronous and asynchronous, which
 //! are implemented by separate functions:
 //! * With synchronous transaction transfer, the function is exited only after
-//! receiving a response from the QUIK server. Therefore, synchronous transactions
-//! can only be sent sequentially, waiting for a response about each sent transaction –
-//! this method is simpler and more suitable for programmers with little
-//!software development experience.
+//!   receiving a response from the QUIK server. Therefore, synchronous transactions
+//!   can only be sent sequentially, waiting for a response about each sent transaction –
+//!   this method is simpler and more suitable for programmers with little
+//!   software development experience.
 //! * With asynchronous transaction transfer, the function is exited immediately.
-//! The callback function is used to receive a response about sent asynchronous transactions.
-//! The function is called every time a response
-//! is received about an executed or rejected transaction.
+//!   The callback function is used to receive a response about sent asynchronous transactions.
+//!   The function is called every time a response
+//!   is received about an executed or rejected transaction.
 //!
 //! A callback function is also provided to monitor connections between
 //! the QUIK terminal and the library Trans2QUIK.dll and between the QUIK Workplace
