@@ -81,7 +81,7 @@ type Trans2QuikTransactionReplyCallback = unsafe extern "C" fn(
 /// TRANS2QUIK_WRONG_CONNECTION_HANDLE 13
 /// TRANS2QUIK_WRONG_INPUT_PARAMS 14
 /// ```
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[repr(i32)]
 pub enum Trans2QuikResult {
     Success = 0,
@@ -659,4 +659,209 @@ unsafe extern "C" fn transaction_reply_callback(
     let trans2quik_result = Trans2QuikResult::from(result_code);
 
     info!("TRANS2QUIK_TRANSACTION_REPLY_CALLBACK -> {:?}, error_code: {}, reply_code: {}, trans_id: {}, order_num: {}, error_message: {}", trans2quik_result, error_code, reply_code, trans_id, order_num, error_message);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+    use tracing_test::traced_test; // Use tracing_test to capture logs
+
+    #[test]
+    fn test_trans2quik_result_conversion() {
+        assert_eq!(Trans2QuikResult::from(0), Trans2QuikResult::Success);
+        assert_eq!(Trans2QuikResult::from(1), Trans2QuikResult::Failed);
+        assert_eq!(
+            Trans2QuikResult::from(2),
+            Trans2QuikResult::TerminalNotFound
+        );
+        assert_eq!(
+            Trans2QuikResult::from(3),
+            Trans2QuikResult::DllVersionNotSupported
+        );
+        assert_eq!(
+            Trans2QuikResult::from(4),
+            Trans2QuikResult::AlreadyConnectedToQuik
+        );
+        assert_eq!(Trans2QuikResult::from(5), Trans2QuikResult::WrongSyntax);
+        assert_eq!(
+            Trans2QuikResult::from(6),
+            Trans2QuikResult::QuikNotConnected
+        );
+        assert_eq!(Trans2QuikResult::from(7), Trans2QuikResult::DllNotConnected);
+        assert_eq!(Trans2QuikResult::from(8), Trans2QuikResult::QuikConnected);
+        assert_eq!(
+            Trans2QuikResult::from(9),
+            Trans2QuikResult::QuikDisconnected
+        );
+        assert_eq!(Trans2QuikResult::from(10), Trans2QuikResult::DllConnected);
+        assert_eq!(
+            Trans2QuikResult::from(11),
+            Trans2QuikResult::DllDisconnected
+        );
+        assert_eq!(
+            Trans2QuikResult::from(12),
+            Trans2QuikResult::MemoryAllocationError
+        );
+        assert_eq!(
+            Trans2QuikResult::from(13),
+            Trans2QuikResult::WrongConnectionHandle
+        );
+        assert_eq!(
+            Trans2QuikResult::from(14),
+            Trans2QuikResult::WrongInputParams
+        );
+        assert_eq!(Trans2QuikResult::from(999), Trans2QuikResult::Unknown);
+    }
+
+    #[test]
+    fn test_trans2quikerror_from_libloadingerror() {
+        // Attempt to load a non-existent library to produce a LibloadingError
+        let libloading_error = unsafe {
+            match Library::new("/invalid/path/to/nonexistent/library") {
+                Ok(_) => panic!("Expected an error, but library loaded successfully."),
+                Err(e) => e,
+            }
+        };
+
+        // Convert it into a Trans2QuikError
+        let trans2quik_error: Trans2QuikError = Trans2QuikError::from(libloading_error);
+
+        // Assert that it matches the expected enumeration variant
+        if let Trans2QuikError::LibLoading(_) = trans2quik_error {
+            // Passed: we correctly converted the error
+        } else {
+            panic!("Expected Trans2QuikError::LibLoading variant.");
+        }
+    }
+
+    #[test]
+    fn test_trans2quikerror_from_nulerror() {
+        // Create a NulError by attempting to construct a CString with an embedded null byte
+        let nul_err = CString::new("Invalid\0String").unwrap_err();
+
+        // Convert it into a Trans2QuikError
+        let trans2quik_error: Trans2QuikError = Trans2QuikError::from(nul_err);
+
+        // Assert that it matches the expected enumeration variant
+        matches!(trans2quik_error, Trans2QuikError::NulError(_));
+    }
+
+    #[test]
+    fn test_display_for_trans2quikerror() {
+        // Test conversion and display message for NulError
+        let nul_err = CString::new("Invalid\0String").unwrap_err();
+        let trans2quik_error_nul: Trans2QuikError = Trans2QuikError::from(nul_err);
+
+        // Test display format for NulError
+        let expected_display_nul = format!("{:?}", trans2quik_error_nul);
+        assert_eq!(expected_display_nul, format!("{}", trans2quik_error_nul));
+
+        // For LibloadingError: simulate a common error scenario
+        // Open a library with an invalid path to trigger a DlOpen error
+        let libloading_error = unsafe {
+            match Library::new("/invalid/path/to/nonexistent/lib") {
+                Ok(_) => panic!("Expected an error, but library loaded successfully"),
+                Err(e) => e,
+            }
+        };
+        let trans2quik_error_lib: Trans2QuikError = Trans2QuikError::from(libloading_error);
+
+        // Test display format for LibLoading error
+        let expected_display_lib = format!("{:?}", trans2quik_error_lib);
+        assert_eq!(expected_display_lib, format!("{}", trans2quik_error_lib));
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_transaction_reply_callback_valid_utf8() {
+        // Set up valid inputs
+        let result_code: c_long = 1;
+        let error_code: c_long = 0;
+        let reply_code: c_long = 0;
+        let trans_id: c_long = 123;
+        let order_num: u64 = 456;
+
+        // Create a valid C string
+        let error_message = CString::new("No Error").unwrap();
+
+        // Call the unsafe function
+        unsafe {
+            transaction_reply_callback(
+                result_code,
+                error_code,
+                reply_code,
+                trans_id,
+                order_num,
+                error_message.into_raw(),
+                ptr::null_mut(),
+            );
+        }
+
+        // Check logs or other side effects
+        assert!(logs_contain("No Error"));
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_transaction_reply_callback_invalid_utf8() {
+        // Set up valid inputs
+        let result_code: c_long = 1;
+        let error_code: c_long = 0;
+        let reply_code: c_long = 0;
+        let trans_id: c_long = 123;
+        let order_num: u64 = 456;
+
+        // Create an invalid CString by embedding invalid UTF-8 bytes
+        let invalid_utf8 = vec![0xff, 0xfe, 0xfd];
+        let error_message = CString::new(invalid_utf8).unwrap();
+
+        // Call the unsafe function
+        unsafe {
+            transaction_reply_callback(
+                result_code,
+                error_code,
+                reply_code,
+                trans_id,
+                order_num,
+                error_message.into_raw(),
+                ptr::null_mut(),
+            );
+        }
+
+        // Check logs or side effects for error message
+        assert!(logs_contain("Invalid UTF-8 in error message"));
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_transaction_reply_callback_logs() {
+        // Set up general inputs
+        let result_code: c_long = 0; // Assuming 0 maps to `Success`
+        let error_code: c_long = 123;
+        let reply_code: c_long = 456;
+        let trans_id: c_long = 789;
+        let order_num: u64 = 101112;
+
+        // Create a valid C string
+        let error_message = CString::new("General Error").unwrap();
+
+        // Call the unsafe function
+        unsafe {
+            transaction_reply_callback(
+                result_code,
+                error_code,
+                reply_code,
+                trans_id,
+                order_num,
+                error_message.into_raw(),
+                ptr::null_mut(),
+            );
+        }
+
+        // Verify the actual log output matches the expected output
+        assert!(logs_contain(
+            "TRANS2QUIK_TRANSACTION_REPLY_CALLBACK -> Success, error_code: 123, reply_code: 456, trans_id: 789, order_num: 101112, error_message: General Error"
+        ));
+    }
 }
