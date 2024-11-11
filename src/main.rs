@@ -1,5 +1,5 @@
 //! # Application for algorithmic trading on the MOEX via the QUIK terminal.
-use tracing_subscriber::{self};
+use tracing_subscriber;
 mod ema;
 mod psql;
 mod quik;
@@ -15,8 +15,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.is_quik_connected()?;
     terminal.set_connection_status_callback()?;
     terminal.set_transactions_reply_callback()?;
+    let class_code = "QJSIM";
+    let sec_code = "LKOH";
+    terminal.subscribe_orders(class_code, sec_code)?;
+    terminal.subscribe_trades(class_code, sec_code)?;
+    terminal.start_orders();
+    terminal.start_trades();
     let transaction_str = "ACCOUNT=NL0011100043; CLIENT_CODE=10077; TYPE=L; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=LKOH; ACTION=NEW_ORDER; OPERATION=B; PRICE=6957,0; QUANTITY=1;";
-    // terminal.send_sync_transaction(transaction_str)?;
     terminal.send_async_transaction(transaction_str)?;
     terminal.disconnect()?;
 
