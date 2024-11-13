@@ -41,6 +41,15 @@ use std::fmt;
 use std::str;
 use std::string::FromUtf8Error;
 use tracing::{error, info};
+use std::sync::{Arc, Mutex, Condvar};
+use lazy_static::lazy_static;
+use encoding_rs::WINDOWS_1251;
+
+lazy_static! {
+    static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+    static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+    static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+}
 
 /// Prototype of a callback function for monitoring the connection status.
 /// This function is used to track the state of the connection between the
@@ -263,9 +272,100 @@ impl From<NulError> for Trans2QuikError {
 ///
 /// # Example of use
 /// ```
-/// let path = r"c:\QUIK Junior\trans2quik.dll";
-/// let terminal = quik::Terminal::new(path)?;
-/// terminal.connect()?;
+/// use tracing::info;
+/// use tracing_subscriber;
+/// use lazy_static::lazy_static;
+/// use std::sync::{Arc, Mutex, Condvar};
+/// use std::time::Duration;
+/// use std::error::Error;
+/// use trans2quik;
+///
+/// lazy_static! {
+///     static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+///     static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+///     static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+/// }
+///
+/// fn main() -> Result<(), Box<dyn Error>> {
+///     tracing_subscriber::fmt::init();
+///
+///     let path = r"c:\QUIK Junior\trans2quik.dll";
+///     let terminal = quik::Terminal::new(path)?;
+///     terminal.connect()?;
+///     terminal.is_dll_connected()?;
+///     terminal.is_quik_connected()?;
+///     terminal.set_connection_status_callback()?;
+///     terminal.set_transactions_reply_callback()?;
+///     let class_code = "QJSIM";
+///     let sec_code = "LKOH";
+///     terminal.subscribe_orders(class_code, sec_code)?;
+///     terminal.subscribe_trades(class_code, sec_code)?;
+///     terminal.start_orders();
+///     terminal.start_trades();
+///     let transaction_str = "ACCOUNT=NL0011100043; CLIENT_CODE=10677; TYPE=L; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=LKOH; ACTION=NEW_ORDER; OPERATION=B; PRICE=7103,5; QUANTITY=1;";
+///     terminal.send_async_transaction(transaction_str)?;
+///
+///     // Waiting for callback or timeout
+///     {
+///         let order_received = {
+///             let (lock, cvar) = ORDER_CALLBACK_RECEIVED.as_ref();
+///             let received = lock.lock().unwrap();
+///             let timeout = Duration::from_secs(10);
+/// 
+///             let (received, timeout_result) = cvar
+///                 .wait_timeout_while(received, timeout, |received| !*received)
+///                 .unwrap();
+///   
+///             if timeout_result.timed_out() {
+///                 info!("Timed out waiting for order_status_callback");
+///             }
+///
+///             *received
+///         };
+///
+///         let trade_received = {
+///             let (lock, cvar) = TRADE_CALLBACK_RECEIVED.as_ref();
+///             let received = lock.lock().unwrap();
+///             let timeout = Duration::from_secs(10);
+///
+///             let (received, timeout_result) = cvar
+///                 .wait_timeout_while(received, timeout, |received| !*received)
+///                 .unwrap();
+///
+///             if timeout_result.timed_out() {
+///                 info!("Timed out waiting for trade_status_callback");
+///             }
+///
+///             *received
+///         };
+///
+///         let transaction_received = {
+///             let (lock, cvar) = TRANSACTION_CALLBACK_RECEIVED.as_ref();
+///             let received = lock.lock().unwrap();
+///             let timeout = Duration::from_secs(10);
+///
+///             let (received, timeout_result) = cvar
+///                 .wait_timeout_while(received, timeout, |received| !*received)
+///                 .unwrap();
+///
+///             if timeout_result.timed_out() {
+///                 info!("Timed out waiting for transaction_reply_callback");
+///             }
+///
+///             *received
+///         };
+///
+///         if !order_received && !trade_received && !transaction_received {
+///             info!("Did not receive all expected callbacks");
+///         }
+///     }    
+///
+///     terminal.unsubscribe_orders()?;
+///     terminal.unsubscribe_trades()?;
+///     terminal.disconnect()?;
+///
+///     Ok(())
+/// }
 /// ```
 pub struct Terminal {
     /// Loading a dynamic library Trans2QUIK.dll, which provides an API for interacting with QUIK.
@@ -273,7 +373,7 @@ pub struct Terminal {
 
     /// Calling a function from the library Trans2QUIK.dll for establishing communication with the QUIK terminal.
     trans2quik_connect:
-        unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_long) -> c_long,
+        unsafe extern "C" fn(*mut c_char, *mut c_long, *mut c_char, c_long) -> c_long,
 
     /// Calling a function from the library Trans2QUIK.dll to disconnecting from the QUIK terminal.
     trans2quik_disconnect: unsafe extern "C" fn(*mut c_long, *mut c_char, c_long) -> c_long,
@@ -288,7 +388,7 @@ pub struct Terminal {
     /// only after receiving the result of the transaction, or after disconnecting the
     /// QUIK terminal from the server.
     trans2quik_send_sync_transaction: unsafe extern "C" fn(
-        trans_str_ptr: *const c_char,
+        trans_str_ptr: *mut c_char,
         reply_code_ptr: *mut c_long,
         trans_id_ptr: *mut c_long,
         order_num_ptr: *mut c_double,
@@ -303,7 +403,7 @@ pub struct Terminal {
     /// the function is executed immediately, and the result of the transaction is reported via
     /// the corresponding callback function.
     trans2quik_send_async_transaction:
-        unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_long) -> c_long,
+        unsafe extern "C" fn(*mut c_char, *mut c_long, *mut c_char, c_long) -> c_long,
 
     /// А callback function for processing the received connection information.
     trans2quik_set_connection_status_callback: unsafe extern "C" fn(
@@ -323,11 +423,11 @@ pub struct Terminal {
 
     /// The function is used to create a list of classes and tools for subscribing to receive orders for them.
     trans2quik_subscribe_orders:
-        unsafe extern "C" fn(class_code: *const c_char, sec_code: *const c_char) -> c_long,
+        unsafe extern "C" fn(class_code: *mut c_char, sec_code: *mut c_char) -> c_long,
 
     /// The function is used to create a list of classes and tools for subscribing to receive trades on them.
     trans2quik_subscribe_trades:
-        unsafe extern "C" fn(class_code: *const c_char, sec_code: *const c_char) -> c_long,
+        unsafe extern "C" fn(class_code: *mut c_char, sec_code: *mut c_char) -> c_long,
 
     /// The function starts the process of receiving requests for classes and tools defined
     /// by the TRANS2QUIK_SUBSCRIBE_ORDERS function.
@@ -356,7 +456,7 @@ impl Terminal {
 
         // Calling a function from the library Trans2QUIK.dll for establishing communication with the QUIK terminal.
         let trans2quik_connect = load_symbol::<
-            unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_long) -> c_long,
+            unsafe extern "C" fn(*mut c_char, *mut c_long, *mut c_char, c_long) -> c_long,
         >(&library, b"TRANS2QUIK_CONNECT\0")?;
 
         // Calling a function from the library Trans2QUIK.dll to disconnecting from the QUIK terminal.
@@ -380,7 +480,7 @@ impl Terminal {
         let trans2quik_send_sync_transaction =
             load_symbol::<
                 unsafe extern "C" fn(
-                    *const c_char,
+                    *mut c_char,
                     *mut c_long,
                     *mut c_long,
                     *mut c_double,
@@ -397,7 +497,7 @@ impl Terminal {
         // the corresponding callback function.
         let trans2quik_send_async_transaction =
             load_symbol::<
-                unsafe extern "C" fn(*const c_char, *mut c_long, *mut c_char, c_long) -> c_long,
+                unsafe extern "C" fn(*mut c_char, *mut c_long, *mut c_char, c_long) -> c_long,
             >(&library, b"TRANS2QUIK_SEND_ASYNC_TRANSACTION\0")?;
 
         // А callback function for processing the received connection information.
@@ -425,12 +525,12 @@ impl Terminal {
         // The function is used to create a list of classes and tools for subscribing to receive
         // applications for them.
         let trans2quik_subscribe_orders = load_symbol::<
-            unsafe extern "C" fn(*const c_char, *const c_char) -> c_long,
+            unsafe extern "C" fn(*mut c_char, *mut c_char) -> c_long,
         >(&library, b"TRANS2QUIK_SUBSCRIBE_ORDERS\0")?;
 
         // The function is used to create a list of classes and tools for subscribing to receive deals on them.
         let trans2quik_subscribe_trades = load_symbol::<
-            unsafe extern "C" fn(*const c_char, *const c_char) -> c_long,
+            unsafe extern "C" fn(*mut c_char, *mut c_char) -> c_long,
         >(&library, b"TRANS2QUIK_SUBSCRIBE_TRADES\0")?;
 
         // The function starts the process of receiving requests for classes and tools defined
@@ -522,7 +622,7 @@ impl Terminal {
     /// The function is used to establish communication with the QUIK terminal.
     pub fn connect(&self) -> Result<Trans2QuikResult, Trans2QuikError> {
         let connection_str = CString::new(r"c:\QUIK Junior")?;
-        let connection_str_ptr = connection_str.as_ptr() as *const c_char;
+        let connection_str_ptr = connection_str.as_ptr() as *mut c_char;
 
         let function = |error_code_ptr: *mut c_long,
                         error_message_ptr: *mut c_char,
@@ -579,7 +679,7 @@ impl Terminal {
         transaction_str: &str,
     ) -> Result<Trans2QuikResult, Trans2QuikError> {
         let trans_str = CString::new(transaction_str)?;
-        let trans_str_ptr = trans_str.as_ptr() as *const c_char;
+        let trans_str_ptr = trans_str.as_ptr() as *mut c_char;
 
         let mut reply_code: c_long = 0;
         let reply_code_ptr = &mut reply_code as *mut c_long;
@@ -652,7 +752,7 @@ impl Terminal {
         transaction_str: &str,
     ) -> Result<Trans2QuikResult, Trans2QuikError> {
         let trans_str = CString::new(transaction_str)?;
-        let trans_str_ptr = trans_str.as_ptr() as *const c_char;
+        let trans_str_ptr = trans_str.as_ptr() as *mut c_char;
 
         let mut error_code: c_long = 0;
         let error_code_ptr = &mut error_code as *mut c_long;
@@ -763,10 +863,10 @@ impl Terminal {
         sec_code: &str,
     ) -> Result<Trans2QuikResult, Trans2QuikError> {
         let class_code_c = CString::new(class_code)?;
-        let class_code_ptr = class_code_c.as_ptr() as *const c_char;
+        let class_code_ptr = class_code_c.as_ptr() as *mut c_char;
 
         let sec_code_c = CString::new(sec_code)?;
-        let sec_code_ptr = sec_code_c.as_ptr() as *const c_char;
+        let sec_code_ptr = sec_code_c.as_ptr() as *mut c_char;
 
         let function_result =
             unsafe { (self.trans2quik_subscribe_orders)(class_code_ptr, sec_code_ptr) };
@@ -788,13 +888,13 @@ impl Terminal {
         sec_code: &str,
     ) -> Result<Trans2QuikResult, Trans2QuikError> {
         let class_code_c = CString::new(class_code)?;
-        let class_code_ptr = class_code_c.as_ptr() as *const c_char;
+        let class_code_ptr = class_code_c.as_ptr() as *mut c_char;
 
         let sec_code_c = CString::new(sec_code)?;
-        let sec_code_ptr = sec_code_c.as_ptr() as *const c_char;
+        let sec_code_ptr = sec_code_c.as_ptr() as *mut c_char;
 
         let function_result =
-            unsafe { (self.trans2quik_subscribe_orders)(class_code_ptr, sec_code_ptr) };
+            unsafe { (self.trans2quik_subscribe_trades)(class_code_ptr, sec_code_ptr) };
 
         let trans2quik_result = Trans2QuikResult::from(function_result);
 
@@ -878,13 +978,16 @@ unsafe extern "C" fn connection_status_callback(
     error_code: c_long,
     error_message: *mut c_char,
 ) {
-    let error_message = match unsafe { CStr::from_ptr(error_message).to_str() } {
-        Ok(valid_str) => valid_str.to_owned(),
-        Err(e) => {
-            // Handle UTF-8 conversion issue
-            error!("Warning: error_message contains invalid UTF-8: {}", e);
-            String::from("Invalid UTF-8 in error_message")
+    let error_message = if !error_message.is_null() {
+        match CStr::from_ptr(error_message).to_str() {
+            Ok(valid_str) => valid_str.to_owned(),
+            Err(e) => {
+                error!("Warning: error_message contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in error_message")
+            }
         }
+    } else {
+        String::from("error_message is null")
     };
 
     let trans2quik_result = Trans2QuikResult::from(connection_event);
@@ -910,18 +1013,25 @@ unsafe extern "C" fn transaction_reply_callback(
     error_message: *mut c_char,
     _trans_reply_descriptor: *mut intptr_t,
 ) {
-    let error_message = match unsafe { CStr::from_ptr(error_message).to_str() } {
-        Ok(valid_str) => valid_str.to_owned(),
-        Err(e) => {
-            // Handle UTF-8 conversion issue
-            error!("Warning: error_message contains invalid UTF-8: {}", e);
-            String::from("Invalid UTF-8 in error_message")
+    let error_message = if !error_message.is_null() {
+        let c_str = CStr::from_ptr(error_message);
+        let bytes = c_str.to_bytes();
+
+        match WINDOWS_1251.decode(bytes) {
+            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
         }
+    } else {
+        String::from("error_message is null")
     };
 
     let trans2quik_result = Trans2QuikResult::from(result_code);
 
     info!("TRANS2QUIK_TRANSACTION_REPLY_CALLBACK -> {:?}, error_code: {}, reply_code: {}, trans_id: {}, order_num: {}, error_message: {}", trans2quik_result, error_code, reply_code, trans_id, order_num, error_message);
+
+    let (lock, cvar) = TRANSACTION_CALLBACK_RECEIVED.as_ref();
+    let mut received = lock.lock().unwrap();
+    *received = true;
+    cvar.notify_one();
 }
 
 /// Callback function to get information about the order parameters.
@@ -939,30 +1049,41 @@ unsafe extern "C" fn order_status_callback(
     _order_descriptor: intptr_t,
 ) {
     let mode = Mode::from(mode);
-    let trans_id = match TransId::from(trans_id) {
-        TransId::Id(id) => id,
-        TransId::Unknown(id) => id,
-    };
-    let class_code = match unsafe { CStr::from_ptr(class_code).to_str() } {
-        Ok(valid_str) => valid_str.to_owned(),
-        Err(e) => {
-            // Handle UTF-8 conversion issue
-            error!("Warning: class_code contains invalid UTF-8: {}", e);
-            String::from("Invalid UTF-8 in class_code")
+    let trans_id = TransId::from(trans_id);
+
+    let class_code = if !class_code.is_null() {
+        match CStr::from_ptr(class_code).to_str() {
+            Ok(valid_str) => valid_str.to_owned(),
+            Err(e) => {
+                error!("Warning: class_code contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in class_code")
+            }
         }
+    } else {
+        String::from("class_code is null")
     };
-    let sec_code = match unsafe { CStr::from_ptr(sec_code).to_str() } {
-        Ok(valid_str) => valid_str.to_owned(),
-        Err(e) => {
-            // Handle UTF-8 conversion issue
-            error!("Warning: sec_code contains invalid UTF-8: {}", e);
-            String::from("Invalid UTF-8 in sec_code")
+ 
+    let sec_code = if !sec_code.is_null() {
+        match CStr::from_ptr(sec_code).to_str() {
+            Ok(valid_str) => valid_str.to_owned(),
+            Err(e) => {
+                error!("Warning: sec_code contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in sec_code")
+            }
         }
+    } else {
+        String::from("sec_code is null")
     };
+     
     let is_sell = IsSell::from(is_sell);
     let status = Status::from(status);
 
-    info!("TRANS2QUIK_ORDER_STATUS_CALLBACK -> mode: {:?}, trans_id: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, balance: {}, value: {}, is_sell: {:?}, status: {:?}", mode, trans_id, order_num, class_code, sec_code, price, balance, value, is_sell, status);
+    info!("TRANS2QUIK_ORDER_STATUS_CALLBACK -> mode: {:?}, trans_id: {:?}, order_num: {}, class_code: {}, sec_code: {}, price: {}, balance: {}, value: {}, is_sell: {:?}, status: {:?}", mode, trans_id, order_num, class_code, sec_code, price, balance, value, is_sell, status);
+
+    let (lock, cvar) = ORDER_CALLBACK_RECEIVED.as_ref();
+    let mut received = lock.lock().unwrap();
+    *received = true;
+    cvar.notify_one();
 }
 
 /// Callback function to get information about the transaction.
@@ -979,25 +1100,39 @@ unsafe extern "C" fn trade_status_callback(
     _trade_descriptor: intptr_t,
 ) {
     let mode = Mode::from(mode);
-    let class_code = match unsafe { CStr::from_ptr(class_code).to_str() } {
-        Ok(valid_str) => valid_str.to_owned(),
-        Err(e) => {
-            // Handle UTF-8 conversion issue
-            error!("Warning: class_code contains invalid UTF-8: {}", e);
-            String::from("Invalid UTF-8 in class_code")
+
+    let class_code = if !class_code.is_null() {
+        match CStr::from_ptr(class_code).to_str() {
+            Ok(valid_str) => valid_str.to_owned(),
+            Err(e) => {
+                error!("Warning: class_code contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in class_code")
+            }
         }
+    } else {
+        String::from("class_code is null")
     };
-    let sec_code = match unsafe { CStr::from_ptr(sec_code).to_str() } {
-        Ok(valid_str) => valid_str.to_owned(),
-        Err(e) => {
-            // Handle UTF-8 conversion issue
-            error!("Warning: sec_code contains invalid UTF-8: {}", e);
-            String::from("Invalid UTF-8 in sec_code")
+ 
+    let sec_code = if !sec_code.is_null() {
+        match CStr::from_ptr(sec_code).to_str() {
+            Ok(valid_str) => valid_str.to_owned(),
+            Err(e) => {
+                error!("Warning: sec_code contains invalid UTF-8: {}", e);
+                String::from("Invalid UTF-8 in sec_code")
+            }
         }
+    } else {
+        String::from("sec_code is null")
     };
+    
     let is_sell = IsSell::from(is_sell);
 
     info!("TRANS2QUIK_ORDER_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);
+
+    let (lock, cvar) = TRADE_CALLBACK_RECEIVED.as_ref();
+    let mut received = lock.lock().unwrap();
+    *received = true;
+    cvar.notify_one();
 }
 
 #[cfg(test)]

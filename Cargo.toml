@@ -1,6 +1,6 @@
 [package]
 name = "quik-rs"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Denis Stepanov", "<stepanov.d.m@yandex.ru>"]
 edition = "2021"
 description = "Application for algorithmic trading on the MOEX via the QUIK terminal."
@@ -24,3 +24,4 @@ rust_decimal = { version = "1.36", features = ["db-tokio-postgres"] }
 rust_decimal_macros = "1.36"
 ta = "0.5.0"
 lazy_static = "1.5.0"
+encoding_rs = "0.8"
