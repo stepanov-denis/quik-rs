@@ -33,6 +33,8 @@
 //! Upon termination of receiving information on applications and transactions, the lists
 //! of received instruments are cleared.
 #![allow(dead_code)]
+use encoding_rs::WINDOWS_1251;
+use lazy_static::lazy_static;
 use libc::{c_char, c_double, c_long, c_ulonglong, intptr_t};
 use libloading::{Error as LibloadingError, Library, Symbol};
 use std::error;
@@ -40,15 +42,16 @@ use std::ffi::{CStr, CString, NulError};
 use std::fmt;
 use std::str;
 use std::string::FromUtf8Error;
+use std::sync::{Arc, Condvar, Mutex};
 use tracing::{error, info};
-use std::sync::{Arc, Mutex, Condvar};
-use lazy_static::lazy_static;
-use encoding_rs::WINDOWS_1251;
 
 lazy_static! {
-    static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+    static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+        Arc::new((Mutex::new(false), Condvar::new()));
+    static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+        Arc::new((Mutex::new(false), Condvar::new()));
+    static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+        Arc::new((Mutex::new(false), Condvar::new()));
 }
 
 /// Prototype of a callback function for monitoring the connection status.
@@ -311,7 +314,7 @@ impl From<NulError> for Trans2QuikError {
 ///             let (lock, cvar) = ORDER_CALLBACK_RECEIVED.as_ref();
 ///             let received = lock.lock().unwrap();
 ///             let timeout = Duration::from_secs(10);
-/// 
+///
 ///             let (received, timeout_result) = cvar
 ///                 .wait_timeout_while(received, timeout, |received| !*received)
 ///                 .unwrap();
@@ -1062,7 +1065,7 @@ unsafe extern "C" fn order_status_callback(
     } else {
         String::from("class_code is null")
     };
- 
+
     let sec_code = if !sec_code.is_null() {
         match CStr::from_ptr(sec_code).to_str() {
             Ok(valid_str) => valid_str.to_owned(),
@@ -1074,7 +1077,7 @@ unsafe extern "C" fn order_status_callback(
     } else {
         String::from("sec_code is null")
     };
-     
+
     let is_sell = IsSell::from(is_sell);
     let status = Status::from(status);
 
@@ -1112,7 +1115,7 @@ unsafe extern "C" fn trade_status_callback(
     } else {
         String::from("class_code is null")
     };
- 
+
     let sec_code = if !sec_code.is_null() {
         match CStr::from_ptr(sec_code).to_str() {
             Ok(valid_str) => valid_str.to_owned(),
@@ -1124,7 +1127,7 @@ unsafe extern "C" fn trade_status_callback(
     } else {
         String::from("sec_code is null")
     };
-    
+
     let is_sell = IsSell::from(is_sell);
 
     info!("TRANS2QUIK_ORDER_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);

@@ -1,18 +1,21 @@
 //! # Application for algorithmic trading on the MOEX via the QUIK terminal.
+use lazy_static::lazy_static;
+use std::error::Error;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 use tracing::info;
 use tracing_subscriber;
-use lazy_static::lazy_static;
-use std::sync::{Arc, Mutex, Condvar};
-use std::time::Duration;
-use std::error::Error;
 mod ema;
 mod psql;
 mod quik;
 
 lazy_static! {
-    static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+    static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+        Arc::new((Mutex::new(false), Condvar::new()));
+    static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+        Arc::new((Mutex::new(false), Condvar::new()));
+    static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+        Arc::new((Mutex::new(false), Condvar::new()));
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -40,55 +43,55 @@ fn main() -> Result<(), Box<dyn Error>> {
             let (lock, cvar) = ORDER_CALLBACK_RECEIVED.as_ref();
             let received = lock.lock().unwrap();
             let timeout = Duration::from_secs(10);
-    
+
             let (received, timeout_result) = cvar
                 .wait_timeout_while(received, timeout, |received| !*received)
                 .unwrap();
-    
+
             if timeout_result.timed_out() {
                 info!("Timed out waiting for order_status_callback");
             }
-    
+
             *received
         };
-    
+
         let trade_received = {
             let (lock, cvar) = TRADE_CALLBACK_RECEIVED.as_ref();
             let received = lock.lock().unwrap();
             let timeout = Duration::from_secs(10);
-    
+
             let (received, timeout_result) = cvar
                 .wait_timeout_while(received, timeout, |received| !*received)
                 .unwrap();
-    
+
             if timeout_result.timed_out() {
                 info!("Timed out waiting for trade_status_callback");
             }
-    
+
             *received
         };
-    
+
         let transaction_received = {
             let (lock, cvar) = TRANSACTION_CALLBACK_RECEIVED.as_ref();
             let received = lock.lock().unwrap();
             let timeout = Duration::from_secs(10);
-    
+
             let (received, timeout_result) = cvar
                 .wait_timeout_while(received, timeout, |received| !*received)
                 .unwrap();
-    
+
             if timeout_result.timed_out() {
                 info!("Timed out waiting for transaction_reply_callback");
             }
-    
+
             *received
         };
-    
+
         if !order_received && !trade_received && !transaction_received {
             info!("Did not receive all expected callbacks");
         }
-    }    
-    
+    }
+
     terminal.unsubscribe_orders()?;
     terminal.unsubscribe_trades()?;
     terminal.disconnect()?;
