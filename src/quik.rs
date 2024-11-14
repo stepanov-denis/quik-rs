@@ -293,7 +293,7 @@ impl From<NulError> for Trans2QuikError {
 ///     tracing_subscriber::fmt::init();
 ///
 ///     let path = r"c:\QUIK Junior\trans2quik.dll";
-///     let terminal = quik::Terminal::new(path)?;
+///     let terminal = trans2quik::Terminal::new(path)?;
 ///     terminal.connect()?;
 ///     terminal.is_dll_connected()?;
 ///     terminal.is_quik_connected()?;
