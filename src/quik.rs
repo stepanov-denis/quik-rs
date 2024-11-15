@@ -274,6 +274,14 @@ impl From<NulError> for Trans2QuikError {
 /// and calling functions from the library to control the terminal and perform trading operations.
 ///
 /// # Example of use
+/// Cargo.toml
+/// ```
+/// trans2quik = "1.0.0"
+/// tracing = "0.1.40"
+/// tracing-subscriber = "0.3.18"
+/// lazy_static = "1.5.0"
+/// ```
+/// main.rs
 /// ```
 /// use tracing::info;
 /// use tracing_subscriber;
@@ -970,9 +978,9 @@ fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, FromUtf8Error> {
 
     let vec_u8_trimmed = &vec_u8[..null_pos];
 
-    let s = String::from_utf8(vec_u8_trimmed.to_vec())?;
+    let (decoded_str, _, _) = WINDOWS_1251.decode(vec_u8_trimmed);
 
-    Ok(s)
+    Ok(decoded_str.into_owned())
 }
 
 /// Callback function for status monitoring connections.
@@ -982,12 +990,11 @@ unsafe extern "C" fn connection_status_callback(
     error_message: *mut c_char,
 ) {
     let error_message = if !error_message.is_null() {
-        match CStr::from_ptr(error_message).to_str() {
-            Ok(valid_str) => valid_str.to_owned(),
-            Err(e) => {
-                error!("Warning: error_message contains invalid UTF-8: {}", e);
-                String::from("Invalid UTF-8 in error_message")
-            }
+        let c_str = CStr::from_ptr(error_message);
+        let bytes = c_str.to_bytes();
+
+        match WINDOWS_1251.decode(bytes) {
+            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
         }
     } else {
         String::from("error_message is null")
@@ -1055,24 +1062,22 @@ unsafe extern "C" fn order_status_callback(
     let trans_id = TransId::from(trans_id);
 
     let class_code = if !class_code.is_null() {
-        match CStr::from_ptr(class_code).to_str() {
-            Ok(valid_str) => valid_str.to_owned(),
-            Err(e) => {
-                error!("Warning: class_code contains invalid UTF-8: {}", e);
-                String::from("Invalid UTF-8 in class_code")
-            }
+        let c_str = CStr::from_ptr(class_code);
+        let bytes = c_str.to_bytes();
+
+        match WINDOWS_1251.decode(bytes) {
+            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
         }
     } else {
         String::from("class_code is null")
     };
 
     let sec_code = if !sec_code.is_null() {
-        match CStr::from_ptr(sec_code).to_str() {
-            Ok(valid_str) => valid_str.to_owned(),
-            Err(e) => {
-                error!("Warning: sec_code contains invalid UTF-8: {}", e);
-                String::from("Invalid UTF-8 in sec_code")
-            }
+        let c_str = CStr::from_ptr(sec_code);
+        let bytes = c_str.to_bytes();
+
+        match WINDOWS_1251.decode(bytes) {
+            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
         }
     } else {
         String::from("sec_code is null")
@@ -1105,24 +1110,22 @@ unsafe extern "C" fn trade_status_callback(
     let mode = Mode::from(mode);
 
     let class_code = if !class_code.is_null() {
-        match CStr::from_ptr(class_code).to_str() {
-            Ok(valid_str) => valid_str.to_owned(),
-            Err(e) => {
-                error!("Warning: class_code contains invalid UTF-8: {}", e);
-                String::from("Invalid UTF-8 in class_code")
-            }
+        let c_str = CStr::from_ptr(class_code);
+        let bytes = c_str.to_bytes();
+
+        match WINDOWS_1251.decode(bytes) {
+            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
         }
     } else {
         String::from("class_code is null")
     };
 
     let sec_code = if !sec_code.is_null() {
-        match CStr::from_ptr(sec_code).to_str() {
-            Ok(valid_str) => valid_str.to_owned(),
-            Err(e) => {
-                error!("Warning: sec_code contains invalid UTF-8: {}", e);
-                String::from("Invalid UTF-8 in sec_code")
-            }
+        let c_str = CStr::from_ptr(sec_code);
+        let bytes = c_str.to_bytes();
+
+        match WINDOWS_1251.decode(bytes) {
+            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
         }
     } else {
         String::from("sec_code is null")
@@ -1130,7 +1133,7 @@ unsafe extern "C" fn trade_status_callback(
 
     let is_sell = IsSell::from(is_sell);
 
-    info!("TRANS2QUIK_ORDER_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);
+    info!("TRANS2QUIK_TRADE_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);
 
     let (lock, cvar) = TRADE_CALLBACK_RECEIVED.as_ref();
     let mut received = lock.lock().unwrap();

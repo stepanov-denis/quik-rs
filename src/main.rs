@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // terminal.subscribe_trades(class_code, sec_code)?;
     // terminal.start_orders();
     // terminal.start_trades();
-    // let transaction_str = "ACCOUNT=NL0011100043; CLIENT_CODE=10677; TYPE=L; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=LKOH; ACTION=NEW_ORDER; OPERATION=B; PRICE=7103,5; QUANTITY=1;";
+    // let transaction_str = "ACCOUNT=NL0011100043; CLIENT_CODE=10677; TYPE=L; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=LKOH; ACTION=NEW_ORDER; OPERATION=B; PRICE=6978,0; QUANTITY=1;";
     // terminal.send_async_transaction(transaction_str)?;
 
     // // Waiting for callback or timeout
@@ -98,16 +98,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // terminal.unsubscribe_trades()?;
     // terminal.disconnect()?;
 
-    let connection_str = "host=localhost user=postgres dbname=postgres password=password";
+    let connection_str = "host=localhost user=postgres dbname=password";
     let database = psql::Db::new(connection_str).await?;
     database.init().await?;
 
     let instrument_code = "LKOH";
-    let short_period_quantity = 8 as usize;
+    let short_period_quantity = 80 as usize;
     let short_period_len: f64 = (1 * 60) as f64;
     let short_interval: f64 = short_period_quantity as f64 * short_period_len as f64;
 
-    let long_period_quantity = 21 as usize;
+    let long_period_quantity = 210 as usize;
     let long_period_len: f64 = (1 * 60) as f64;
     let long_interval: f64 = long_period_quantity as f64 * long_period_len as f64;
 
