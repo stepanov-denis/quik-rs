@@ -85,7 +85,7 @@ async fn run_main_loop(shutdown_signal: Arc<AtomicBool>) -> Result<(), Box<dyn E
     terminal.start_trades();
 
     // Preparing for work with PostgreSQL
-    let connection_str = "host=localhost user=postgres dbname=postgres password=jym-Nut-setvam";
+    let connection_str = "host=localhost user=postgres dbname=postgres password=password";
     let database = psql::Db::new(connection_str).await?;
     database.init().await?;
 
