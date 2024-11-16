@@ -3,6 +3,7 @@
 use std::fmt;
 use std::error;
 use crate::psql::{DataForEma, Db};
+use crate::quik::Terminal;
 use bb8::RunError;
 use ta::indicators::ExponentialMovingAverage;
 use ta::DataItem;
@@ -40,6 +41,7 @@ pub struct Ema {}
 impl Ema {
     pub async fn calc(
         database: &Db,
+        terminal: &Terminal,
         instrument_code: &str,
         interval: f64,
         period_len: f64,
@@ -50,6 +52,9 @@ impl Ema {
             .await?;
         let ema_period = data_for_ema.len();
         if ema_period != period_quantity {
+            terminal.unsubscribe_orders();
+            terminal.unsubscribe_trades();
+            terminal.disconnect();
             let err = EmaError::NoData;
             error!("{}", err);
             return Err(err)
