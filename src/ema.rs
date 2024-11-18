@@ -8,7 +8,7 @@ use bb8::RunError;
 use ta::indicators::ExponentialMovingAverage;
 use ta::DataItem;
 use ta::Next;
-use tracing::error;
+use tracing::{info, error};
 
 
 /// Composite error type for Ema.
@@ -47,10 +47,13 @@ impl Ema {
         period_len: f64,
         period_quantity: usize,
     ) -> Result<f64, EmaError> {
+        info!("instrument_code: {}, interval: {}, period_len: {}, period_quantity: {}", instrument_code, interval, period_len, period_quantity);
         let data_for_ema = database
             .get_data_for_ema(instrument_code, interval, period_len)
             .await?;
+        info!("data_for_ema: {:?}", data_for_ema);
         let ema_period = data_for_ema.len();
+        info!("ema_period: {}, period_quantity: {}", ema_period, period_quantity);
         if ema_period != period_quantity {
             terminal.unsubscribe_orders();
             terminal.unsubscribe_trades();
