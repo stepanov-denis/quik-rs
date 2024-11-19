@@ -1,7 +1,7 @@
 //! # It works with exchange data from the PostgreSQL DBMS.
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, TimeZone};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
@@ -17,6 +17,14 @@ pub struct DataForEma {
 
 pub struct Db {
     pool: Pool<PostgresConnectionManager<NoTls>>,
+}
+
+/// Список инструментов для торговли
+pub struct Instruments {
+    class_code: String,
+    status: String,
+    pub sec_code: String,
+    name: String,
 }
 
 impl Db {
@@ -234,6 +242,85 @@ impl Db {
         self.before_update_current_trades().await?;
 
         Ok(())
+    }
+
+    pub async fn get_instruments(
+        &self,
+        class_code: &str,
+        instrument_status: &str,
+    ) -> Result<Vec<Instruments>, RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Получаем соединение из пула
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("Ошибка получения соединения из пула: {:?}", e);
+            e
+        })?;
+    
+        // SQL-запрос с использованием приведения типов
+        let query = "
+        SELECT DISTINCT ON (instrument_code)
+            class_code, instrument_status, instrument_code, instrument, update_timestamptz
+        FROM historical_trades
+        WHERE class_code = $1
+          AND instrument_status = $2
+        ORDER BY instrument_code, update_timestamptz DESC
+    ";
+    
+        // Выполняем запрос с параметрами
+        let rows = conn
+            .query(
+                query,
+                &[
+                    &class_code,
+                    &instrument_status,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Ошибка выполнения запроса получения списка инструментов: {:?}",
+                    e
+                );
+                e
+            })?;
+    
+        // Печатаем названия столбцов
+        println!(
+            "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
+            "class_code", "status", "sec_code", "name", "update_timestamptz"
+        );
+    
+        // Печатаем разделительную линию
+        println!(
+            "{:-<12}-+-{:-<32}-+-{:-<12}-+-{:-<20}-+-{:<30}-",
+            "", "", "", "", ""
+        );
+    
+        // Создаем вектор для DataItem
+        let mut instruments: Vec<Instruments> = Vec::new();
+    
+        // Обрабатываем результаты
+        for row in rows {
+            let class_code: String = row.get("class_code");
+            let status: String = row.get("instrument_status");
+            let sec_code: String = row.get("instrument_code");
+            let name: String = row.get("instrument");
+            let update_timestamptz: DateTime<Utc> = row.get("update_timestamptz");
+    
+            println!(
+                "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
+                class_code, status, sec_code, name, update_timestamptz
+            );
+    
+            let instr = Instruments {
+                class_code,
+                status,
+                sec_code,
+                name,
+            };
+    
+            instruments.push(instr);
+        }
+        Ok(instruments)
     }
 
     // Получение данных торгов для расчета EMA

@@ -42,9 +42,11 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
     let connection_str = "host=localhost user=postgres dbname=postgres password=password";
     let database = psql::Db::new(connection_str).await?;
     database.init().await?;
+    let class_code = "QJSIM";
+    let instrument_status = "торгуется";
+    let instruments = database.get_instruments(class_code, instrument_status).await?;
 
     // Preparing for trading
-    let instrument_code = "LKOH";
     let short_period_quantity = 8 as usize;
     let short_period_len: f64 = (1 * 60) as f64;
     let short_interval: f64 = short_period_quantity as f64 * short_period_len as f64;
@@ -63,6 +65,7 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
             Some(command) = command_receiver.recv() => {
                 match command {
                     AppCommand::Shutdown => {
+                        info!("Shutdown signal");
                         // Доступ к terminal через Mutex
                         let terminal_guard = terminal.lock().await;
                         // Выполняем необходимые асинхронные действия
@@ -76,54 +79,54 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                             eprintln!("Error disconnecting: {}", err);
                         }
 
-                        tracing::info!("Shutdown sequence completed");
+                        info!("Shutdown sequence completed");
                         break;
                     }
                     // Обработка других команд
                 }
             },
             result = async {
-                // Блок с торговой логикой, возвращающий Result
+                for instrument in &instruments {
+                    // Блок с торговой логикой, возвращающий Result
+                    // Получаем доступ к terminal
+                    let mut terminal_guard = terminal.lock().await;
 
-                // Получаем доступ к terminal и database
-                let mut terminal_guard = terminal.lock().await;
+                    // Вычисляем short EMA
+                    let short_ema = ema::Ema::calc(
+                        &database,
+                        &terminal_guard,
+                        &instrument.sec_code,
+                        short_interval,
+                        short_period_len,
+                        short_period_quantity,
+                    ).await?;
 
-                // Вычисляем short EMA
-                let short_ema = ema::Ema::calc(
-                    &database,
-                    &terminal_guard,
-                    instrument_code,
-                    short_interval,
-                    short_period_len,
-                    short_period_quantity,
-                ).await?;
+                    // Вычисляем long EMA
+                    let long_ema = ema::Ema::calc(
+                        &database,
+                        &terminal_guard,
+                        &instrument.sec_code,
+                        long_interval,
+                        long_period_len,
+                        long_period_quantity,
+                    ).await?;
 
-                // Вычисляем long EMA
-                let long_ema = ema::Ema::calc(
-                    &database,
-                    &terminal_guard,
-                    instrument_code,
-                    long_interval,
-                    long_period_len,
-                    long_period_quantity,
-                ).await?;
-
-                // Обновляем сигнал пересечения
-                if let Some(signal) = crossover_signal.update(short_ema, long_ema) {
-                    match signal {
-                        Signal::Buy => {
-                            info!("Сигнал на покупку!");
-                            let transaction_str = "YOUR_TRANSACTION_STRING_FOR_BUY";
-                            terminal_guard.send_async_transaction(transaction_str)?;
-                        }
-                        Signal::Sell => {
-                            info!("Сигнал на продажу!");
-                            let transaction_str = "YOUR_TRANSACTION_STRING_FOR_SELL";
-                            terminal_guard.send_async_transaction(transaction_str)?;
+                    // Обновляем сигнал пересечения
+                    if let Some(signal) = crossover_signal.update(short_ema, long_ema) {
+                        match signal {
+                            Signal::Buy => {
+                                info!("Сигнал на покупку!");
+                                let transaction_str = "YOUR_TRANSACTION_STRING_FOR_BUY";
+                                terminal_guard.send_async_transaction(transaction_str)?;
+                            }
+                            Signal::Sell => {
+                                info!("Сигнал на продажу!");
+                                let transaction_str = "YOUR_TRANSACTION_STRING_FOR_SELL";
+                                terminal_guard.send_async_transaction(transaction_str)?;
+                            }
                         }
                     }
                 }
-
                 // Пауза перед следующей итерацией
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
