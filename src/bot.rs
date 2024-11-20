@@ -44,7 +44,7 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
     database.init().await?;
     let class_code = "QJSIM";
     let instrument_status = "торгуется";
-    let instruments = database.get_instruments(class_code, instrument_status).await?;
+    let mut instruments = database.get_instruments(class_code, instrument_status).await?;
 
     // Preparing for trading
     let short_period_quantity = 8 as usize;
@@ -55,10 +55,10 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
     let long_period_len: f64 = (1 * 60) as f64;
     let long_interval: f64 = long_period_quantity as f64 * long_period_len as f64;
 
-    let hysteresis_percentage = 0.03; // 1% гистерезис
-    let hysteresis_periods = 3; // 3 периода гистерезиса
-    let mut crossover_signal =
-        CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
+    // let hysteresis_percentage = 0.03; // 1% гистерезис
+    // let hysteresis_periods = 3; // 3 периода гистерезиса
+    // let mut crossover_signal =
+    //     CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
     
     loop {
         tokio::select! {
@@ -86,41 +86,61 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                 }
             },
             result = async {
-                for instrument in &instruments {
+                for instrument in &mut instruments {
                     // Блок с торговой логикой, возвращающий Result
                     // Получаем доступ к terminal
-                    let mut terminal_guard = terminal.lock().await;
+                    let terminal_guard = terminal.lock().await;
 
                     // Вычисляем short EMA
-                    let short_ema = ema::Ema::calc(
+                    let short_ema_result = ema::Ema::calc(
                         &database,
-                        &terminal_guard,
                         &instrument.sec_code,
                         short_interval,
                         short_period_len,
                         short_period_quantity,
-                    ).await?;
+                    ).await;
+
+                    let short_ema = match short_ema_result {
+                        Ok(ema) => {
+                            info!("short_ema: {}", ema);
+                            ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
 
                     // Вычисляем long EMA
-                    let long_ema = ema::Ema::calc(
+                    let long_ema_result = ema::Ema::calc(
                         &database,
-                        &terminal_guard,
                         &instrument.sec_code,
                         long_interval,
                         long_period_len,
                         long_period_quantity,
-                    ).await?;
+                    ).await;
+
+                    let long_ema = match long_ema_result {
+                        Ok(ema) => {
+                            info!("long_ema: {}", ema);
+                            ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
 
                     // Обновляем сигнал пересечения
-                    if let Some(signal) = crossover_signal.update(short_ema, long_ema) {
+                    if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
                         match signal {
                             Signal::Buy => {
-                                info!("Сигнал на покупку!");
+                                info!("{} => {:?}", instrument.sec_code, signal);
                                 let transaction_str = "YOUR_TRANSACTION_STRING_FOR_BUY";
                                 terminal_guard.send_async_transaction(transaction_str)?;
                             }
                             Signal::Sell => {
-                                info!("Сигнал на продажу!");
+                                info!("{} => {:?}", instrument.sec_code, signal);
                                 let transaction_str = "YOUR_TRANSACTION_STRING_FOR_SELL";
                                 terminal_guard.send_async_transaction(transaction_str)?;
                             }
@@ -128,7 +148,7 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                     }
                 }
                 // Пауза перед следующей итерацией
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {
@@ -138,7 +158,7 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                     }
                     Err(err) => {
                         // Обработка ошибки
-                        error!("Ошибка в торговом алгоритме: {}", err);// Возможно, логично выйти из цикла при ошибке
+                        error!("Bot error: {}", err);// Возможно, логично выйти из цикла при ошибке
                         break;
                     }
                 }

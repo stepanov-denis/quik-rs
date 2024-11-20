@@ -1,10 +1,11 @@
 //! # It works with exchange data from the PostgreSQL DBMS.
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, Utc, TimeZone};
+use chrono::{DateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
+use crate::signal::CrossoverSignal;
 
 #[derive(Debug)]
 pub struct DataForEma {
@@ -25,6 +26,7 @@ pub struct Instruments {
     status: String,
     pub sec_code: String,
     name: String,
+    pub crossover_signal: CrossoverSignal
 }
 
 impl Db {
@@ -310,12 +312,18 @@ impl Db {
                 "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
                 class_code, status, sec_code, name, update_timestamptz
             );
+
+            let hysteresis_percentage = 0.03; // 1% гистерезис
+            let hysteresis_periods = 3; // 3 периода гистерезиса
+            let crossover_signal =
+                CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
     
             let instr = Instruments {
                 class_code,
                 status,
                 sec_code,
                 name,
+                crossover_signal,
             };
     
             instruments.push(instr);

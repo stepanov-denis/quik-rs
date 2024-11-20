@@ -48,32 +48,23 @@ impl CrossoverSignal {
 
         let ema_diff = short_ema - long_ema;
         let ema_percentage = ema_diff / long_ema * 100.0;
-
-        info!("short_ema: {}, long_ema: {}", short_ema, long_ema);
-
-        info!(
-            "ema_precentage: {}, hysteresis_precentage: {}",
-            ema_percentage, self.hysteresis_percentage
-        );
+        info!("Start update signal");
+        info!("short_ema: {}, long_ema: {}, ema_percentage: {}, hysteresis_percentage: {}", short_ema, long_ema, ema_percentage, self.hysteresis_percentage);
 
         // Определяем новое состояние на основе процентной разницы EMA и гистерезиса
-        info!("let new state =");
+        info!("Check new state");
         let new_state = if ema_percentage > self.hysteresis_percentage {
-            info!("state above");
+            info!("State above");
             State::Above
         } else if ema_percentage < -self.hysteresis_percentage {
-            info!("state below");
+            info!("State below");
             State::Below
         } else {
-            info!("state between");
+            info!("State between");
             State::Between
         };
 
-        info!(
-            "new_state: {:?}, self.state: {:?}, self.time_in_state: {}",
-            new_state, self.state, self.time_in_state
-        );
-        info!("Проверяем, изменилось ли состояние");
+        info!("Check change state");
         // Проверяем, изменилось ли состояние
         if new_state == self.state {
             // Состояние не изменилось, увеличиваем время в состоянии
@@ -83,8 +74,6 @@ impl CrossoverSignal {
             self.state = new_state;
             self.time_in_state = 1;
         }
-
-        info!("new_state: {:?}, self.state: {:?}, self.time_in_state: {}, self.hysteresis_periods: {}", new_state, self.state, self.time_in_state, self.hysteresis_periods);
 
         // Проверяем, превышает ли время в текущем состоянии гистерезис по времени
         match self.state {

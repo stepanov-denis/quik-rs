@@ -41,29 +41,24 @@ pub struct Ema {}
 impl Ema {
     pub async fn calc(
         database: &Db,
-        terminal: &Terminal,
         instrument_code: &str,
         interval: f64,
         period_len: f64,
         period_quantity: usize,
     ) -> Result<f64, EmaError> {
+        info!("Start calculate EMA");
         info!("instrument_code: {}, interval: {}, period_len: {}, period_quantity: {}", instrument_code, interval, period_len, period_quantity);
         let data_for_ema = database
             .get_data_for_ema(instrument_code, interval, period_len)
             .await?;
-        info!("data_for_ema: {:?}", data_for_ema);
+        // info!("data_for_ema: {:?}", data_for_ema);
         let ema_period = data_for_ema.len();
         info!("ema_period: {}, period_quantity: {}", ema_period, period_quantity);
         if ema_period != period_quantity {
-            terminal.unsubscribe_orders();
-            terminal.unsubscribe_trades();
-            terminal.disconnect();
-            let err = EmaError::NoData;
-            error!("{}", err);
-            return Err(err)
+            return Err(EmaError::NoData)
         }
         let mut ema = ExponentialMovingAverage::new(ema_period).unwrap();
-        println!("ema new with period = {}", ema);
+        info!("ema new with period = {}", ema);
         let mut ema_value = 0.0;
         for data in data_for_ema {
             let item = DataItem::builder()
@@ -74,35 +69,13 @@ impl Ema {
                 .volume(data.volume)
                 .build()
                 .unwrap();
-            println!("item = {:?}", item);
+            // info!("item = {:?}", item);
 
             ema_value = ema.next(&item);
-            println!("ema next = {}", ema_value);
+            // info!("ema next = {}", ema_value);
         }
-        println!("ema value: {}", ema);
+        // info!("ema value: {}", ema);
 
         Ok(ema_value)
     }
-}
-
-fn calc_ema(data_for_ema: Vec<DataForEma>, _period_quantity: f64) -> f64 {
-    let period = data_for_ema.len();
-    let mut ema = ExponentialMovingAverage::new(period).unwrap();
-    println!("ema new with period = {}", ema);
-    let mut ema_value = 0.0;
-    for data in data_for_ema {
-        let item = DataItem::builder()
-            .open(data.open)
-            .high(data.high)
-            .low(data.low)
-            .close(data.close)
-            .volume(data.volume)
-            .build()
-            .unwrap();
-        println!("item = {:?}", item);
-
-        ema_value = ema.next(&item);
-        println!("ema next = {}", ema_value);
-    }
-    ema_value
 }

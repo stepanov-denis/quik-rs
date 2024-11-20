@@ -6,7 +6,7 @@ use std::sync::{
 };
 
 pub enum AppCommand {
-    Shutdown, // Команда на завершение работы
+    Shutdown, // Команда на завершение работы для QUIK
 }
 
 pub struct MyApp {
