@@ -2,13 +2,12 @@
 // use core::fmt;
 use std::fmt;
 use std::error;
-use crate::psql::{DataForEma, Db};
-use crate::quik::Terminal;
+use crate::psql::Db;
 use bb8::RunError;
 use ta::indicators::ExponentialMovingAverage;
 use ta::DataItem;
 use ta::Next;
-use tracing::{info, error};
+use tracing::info;
 
 
 /// Composite error type for Ema.

@@ -1,20 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
-use lazy_static::lazy_static;
 use std::error::Error;
 // use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{info, error};
-use tracing_subscriber;
 use crate::quik::Terminal;
-use crate::signal::{Signal, CrossoverSignal};
+use crate::signal::Signal;
 use crate::app::AppCommand;
 use crate::psql;
 use crate::ema;
-use eframe::egui;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+    atomic::{AtomicBool},
+Arc,
 };
 use tokio::sync::Mutex;
 
@@ -54,11 +50,6 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
     let long_period_quantity = 21 as usize;
     let long_period_len: f64 = (1 * 60) as f64;
     let long_interval: f64 = long_period_quantity as f64 * long_period_len as f64;
-
-    // let hysteresis_percentage = 0.03; // 1% гистерезис
-    // let hysteresis_periods = 3; // 3 периода гистерезиса
-    // let mut crossover_signal =
-    //     CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
     
     loop {
         tokio::select! {

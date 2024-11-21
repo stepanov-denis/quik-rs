@@ -1,12 +1,5 @@
 //! # Application for algorithmic trading on the MOEX via the QUIK terminal.
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use lazy_static::lazy_static;
-use std::error::Error;
-// use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
-use tracing::info;
 use tracing_subscriber;
-use crate::signal::{Signal, CrossoverSignal};
 mod ema;
 mod psql;
 mod quik;
@@ -14,7 +7,6 @@ mod signal;
 mod app;
 mod bot;
 use eframe::egui;
-use std::sync::mpsc::{channel, Sender};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
