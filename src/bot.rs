@@ -1,33 +1,65 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
-use std::error::Error;
-// use std::sync::{Arc, Condvar, Mutex};
-use tokio::sync::mpsc;
-use tracing::{info, error};
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use crate::app::AppCommand;
+use crate::ema;
+use crate::psql;
 use crate::quik::Terminal;
 use crate::signal::Signal;
-use crate::app::AppCommand;
-use crate::psql;
-use crate::ema;
+// use egui::mutex::MutexGuard;
+use std::error::Error;
 use std::sync::{
-    atomic::{AtomicBool},
-Arc,
+    // atomic::AtomicBool,
+    Arc,
 };
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::sync::MutexGuard as TokioMutexGuard;
+use tracing::{error, info};
 
-pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc::UnboundedReceiver<AppCommand>) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static str> {
+    if sec_code.is_empty() {
+        return Err("SECCODE cannot be empty");
+    }
+    if operation.is_empty() {
+        return Err("OPERATION cannot be empty");
+    }
+
+    let template = "ACCOUNT=NL0011100043; CLIENT_CODE=10677; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=B; QUANTITY=1;";
+    let replaced_sec_code = template.replace("SECCODE=", &format!("SECCODE={};", sec_code));
+    let transaction = replaced_sec_code.replace("OPERATION=", &format!("OPERATION={};", operation));
+
+    Ok(transaction)
+}
+
+fn process_transaction(terminal_guard: TokioMutexGuard<'_, Terminal>, transaction_str: &str) {
+    let result = terminal_guard.send_async_transaction(transaction_str);
+
+    match result {
+        Ok(_) => {
+            info!("Transaction successfully sent: {}", transaction_str);
+        }
+        Err(e) => {
+            error!("Failed to send transaction '{}': {}", transaction_str, e);
+        }
+    }
+}
+
+pub async fn trade(
+    mut command_receiver: mpsc::UnboundedReceiver<AppCommand>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Preparing to work with QUIK
     let path = r"c:\QUIK Junior\trans2quik.dll";
     let terminal = Terminal::new(path)?;
     let terminal = Arc::new(Mutex::new(terminal));
     {
-        let mut terminal_guard = terminal.lock().await;
+        let terminal_guard = terminal.lock().await;
         terminal_guard.connect()?;
         terminal_guard.is_dll_connected()?;
         terminal_guard.is_quik_connected()?;
         terminal_guard.set_connection_status_callback()?;
         terminal_guard.set_transactions_reply_callback()?;
-        let class_code = "QJSIM";
-        let sec_code = "LKOH";
+        let class_code = "";
+        let sec_code = "";
         terminal_guard.subscribe_orders(class_code, sec_code)?;
         terminal_guard.subscribe_trades(class_code, sec_code)?;
         terminal_guard.start_orders();
@@ -40,7 +72,9 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
     database.init().await?;
     let class_code = "QJSIM";
     let instrument_status = "торгуется";
-    let mut instruments = database.get_instruments(class_code, instrument_status).await?;
+    let mut instruments = database
+        .get_instruments(class_code, instrument_status)
+        .await?;
 
     // Preparing for trading
     let short_period_quantity = 8 as usize;
@@ -50,16 +84,16 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
     let long_period_quantity = 21 as usize;
     let long_period_len: f64 = (1 * 60) as f64;
     let long_interval: f64 = long_period_quantity as f64 * long_period_len as f64;
-    
+
     loop {
         tokio::select! {
             Some(command) = command_receiver.recv() => {
                 match command {
                     AppCommand::Shutdown => {
                         info!("Shutdown signal");
-                        // Доступ к terminal через Mutex
+                        // Access to terminal via Mutex
                         let terminal_guard = terminal.lock().await;
-                        // Выполняем необходимые асинхронные действия
+
                         if let Err(err) = terminal_guard.unsubscribe_orders() {
                             eprintln!("Error unsubscribing from orders: {}", err);
                         }
@@ -73,16 +107,14 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                         info!("Shutdown sequence completed");
                         break;
                     }
-                    // Обработка других команд
                 }
             },
             result = async {
                 for instrument in &mut instruments {
-                    // Блок с торговой логикой, возвращающий Result
-                    // Получаем доступ к terminal
+                    // Get access to the terminal
                     let terminal_guard = terminal.lock().await;
 
-                    // Вычисляем short EMA
+                    // Calculate the short EMA
                     let short_ema_result = ema::Ema::calc(
                         &database,
                         &instrument.sec_code,
@@ -102,7 +134,7 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                         }
                     };
 
-                    // Вычисляем long EMA
+                    // Calculate the long EMA
                     let long_ema_result = ema::Ema::calc(
                         &database,
                         &instrument.sec_code,
@@ -122,34 +154,46 @@ pub async fn trade(shutdown_signal: Arc<AtomicBool>, mut command_receiver: mpsc:
                         }
                     };
 
-                    // Обновляем сигнал пересечения
+                    // Updating the golden cross/death cross signal
                     if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
                         match signal {
                             Signal::Buy => {
                                 info!("{} => {:?}", instrument.sec_code, signal);
-                                let transaction_str = "YOUR_TRANSACTION_STRING_FOR_BUY";
-                                terminal_guard.send_async_transaction(transaction_str)?;
+                                let operation = "B";
+                                let transaction_str = transaction_str(&instrument.sec_code, operation);
+                                match transaction_str {
+                                    Ok(str) => {
+                                        process_transaction(terminal_guard, &str);
+                                    }
+                                    Err(e) => error!("Create transaction_str error: {}", e)
+                                }
                             }
                             Signal::Sell => {
                                 info!("{} => {:?}", instrument.sec_code, signal);
-                                let transaction_str = "YOUR_TRANSACTION_STRING_FOR_SELL";
-                                terminal_guard.send_async_transaction(transaction_str)?;
+                                let operation = "S";
+                                let transaction_str = transaction_str(&instrument.sec_code, operation);
+                                match transaction_str {
+                                    Ok(str) => {
+                                        process_transaction(terminal_guard, &str);
+                                    }
+                                    Err(e) => error!("Create transaction_str error: {}", e)
+                                }
                             }
                         }
                     }
                 }
-                // Пауза перед следующей итерацией
+                // Pause before the next iteration
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {
                 match result {
                     Ok(_) => {
-                        // Все прошло успешно, продолжаем цикл
+                        // Everything went well, we continue the cycle
                     }
                     Err(err) => {
-                        // Обработка ошибки
-                        error!("Bot error: {}", err);// Возможно, логично выйти из цикла при ошибке
+                        // Error Handling
+                        error!("Bot error: {}", err);
                         break;
                     }
                 }

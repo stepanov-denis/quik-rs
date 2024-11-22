@@ -1,28 +1,25 @@
 //! # Calculates the Exponential Moving Average (EMA), also known as an exponentially weighted moving average (EWMA).
-// use core::fmt;
-use std::fmt;
-use std::error;
 use crate::psql::Db;
 use bb8::RunError;
+use std::error;
+use std::fmt;
 use ta::indicators::ExponentialMovingAverage;
 use ta::DataItem;
 use ta::Next;
 use tracing::info;
 
-
 /// Composite error type for Ema.
 #[derive(Debug)]
 pub enum EmaError {
     Bb8(RunError<bb8_postgres::tokio_postgres::Error>),
-    NoData
-
+    NoData,
 }
 
 impl fmt::Display for EmaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EmaError::Bb8(err) => write!(f, "{}", err),
-            EmaError::NoData => write!(f, "There is not enough data to calculate the EMA")
+            EmaError::NoData => write!(f, "There is not enough data to calculate the EMA"),
         }
     }
 }
@@ -40,21 +37,27 @@ pub struct Ema {}
 impl Ema {
     pub async fn calc(
         database: &Db,
-        instrument_code: &str,
+        sec_code: &str,
         interval: f64,
         period_len: f64,
         period_quantity: usize,
     ) -> Result<f64, EmaError> {
         info!("Start calculate EMA");
-        info!("instrument_code: {}, interval: {}, period_len: {}, period_quantity: {}", instrument_code, interval, period_len, period_quantity);
+        info!(
+            "instrument_code: {}, interval: {}, period_len: {}, period_quantity: {}",
+            sec_code, interval, period_len, period_quantity
+        );
         let data_for_ema = database
-            .get_data_for_ema(instrument_code, interval, period_len)
+            .get_data_for_ema(sec_code, interval, period_len)
             .await?;
         // info!("data_for_ema: {:?}", data_for_ema);
         let ema_period = data_for_ema.len();
-        info!("ema_period: {}, period_quantity: {}", ema_period, period_quantity);
+        info!(
+            "ema_period: {}, period_quantity: {}",
+            ema_period, period_quantity
+        );
         if ema_period != period_quantity {
-            return Err(EmaError::NoData)
+            return Err(EmaError::NoData);
         }
         let mut ema = ExponentialMovingAverage::new(ema_period).unwrap();
         info!("ema new with period = {}", ema);

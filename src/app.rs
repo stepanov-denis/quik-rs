@@ -1,9 +1,9 @@
+// use std::sync::{
+//     atomic::{AtomicBool, Ordering},
+//     Arc,
+// };
 use tokio::sync::mpsc;
-use tracing::{info, error};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use tracing::{error, info};
 
 pub enum AppCommand {
     Shutdown, // Команда на завершение работы для QUIK
@@ -12,16 +12,16 @@ pub enum AppCommand {
 pub struct MyApp {
     show_confirmation_dialog: bool,
     allowed_to_close: bool,
-    shutdown_signal: Arc<AtomicBool>,
-    command_sender: mpsc::UnboundedSender<AppCommand>, // Добавляем отправитель команд
+    // shutdown_signal: Arc<AtomicBool>,
+    command_sender: mpsc::UnboundedSender<AppCommand>,
 }
 
 impl MyApp {
-    pub fn new(shutdown_signal: Arc<AtomicBool>, command_sender: mpsc::UnboundedSender<AppCommand>) -> Self {
+    pub fn new(command_sender: mpsc::UnboundedSender<AppCommand>) -> Self {
         Self {
             show_confirmation_dialog: false,
             allowed_to_close: false,
-            shutdown_signal,
+            // shutdown_signal,
             command_sender,
         }
     }
@@ -30,7 +30,7 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Try to close the window");
+            ui.heading("Make some money");
         });
 
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -42,8 +42,8 @@ impl eframe::App for MyApp {
                 if let Err(err) = self.command_sender.send(AppCommand::Shutdown) {
                     error!("Failed to send shutdown command: {}", err);
                 }
-                
-                self.shutdown_signal.store(true, Ordering::Relaxed);
+
+                // self.shutdown_signal.store(true, Ordering::Relaxed);
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.show_confirmation_dialog = true;

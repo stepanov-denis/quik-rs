@@ -1,11 +1,11 @@
 //! # It works with exchange data from the PostgreSQL DBMS.
+use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, Utc, Local};
+use chrono::{DateTime, Local};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use tracing::{info, error};
-use crate::signal::CrossoverSignal;
+use tracing::error;
 
 #[derive(Debug)]
 pub struct DataForEma {
@@ -22,11 +22,11 @@ pub struct Db {
 
 /// Trading instruments
 pub struct Instruments {
-    class_code: String,
-    instrument_status: String,
+    // class_code: String,
+    // instrument_status: String,
     pub sec_code: String,
-    instr_short_name: String,
-    pub crossover_signal: CrossoverSignal
+    // instr_short_name: String,
+    pub crossover_signal: CrossoverSignal,
 }
 
 impl Db {
@@ -220,25 +220,25 @@ impl Db {
         let create_current_trades = self.create_current_trades().await;
         match create_current_trades {
             Ok(_) => {}
-            Err(e) => error!("create table current_trades error: {}", e)
+            Err(e) => error!("create table current_trades error: {}", e),
         }
 
         let create_historical_trades = self.create_historical_trades().await;
         match create_historical_trades {
             Ok(_) => {}
-            Err(e) => error!("create table historical_trades error: {}", e)
+            Err(e) => error!("create table historical_trades error: {}", e),
         }
 
         let insert_into_historical = self.insert_into_historical().await;
         match insert_into_historical {
             Ok(_) => {}
-            Err(e) => error!("create function insert_into_historical error: {}", e)
+            Err(e) => error!("create function insert_into_historical error: {}", e),
         }
 
         let before_update_current_trades = self.before_update_current_trades().await;
         match before_update_current_trades {
             Ok(_) => {}
-            Err(e) => error!("create trigger before_update_current_trades error: {}", e)
+            Err(e) => error!("create trigger before_update_current_trades error: {}", e),
         }
 
         Ok(())
@@ -254,7 +254,7 @@ impl Db {
             error!("Error get a connection from the pool: {:?}", e);
             e
         })?;
-    
+
         let query = "
         SELECT DISTINCT ON (instrument_code)
             class_code, instrument_status, sec_code, instrument, update_timestamp
@@ -263,15 +263,9 @@ impl Db {
           AND instrument_status = $2
         ORDER BY sec_code, update_timestamp DESC
     ";
-    
+
         let rows = conn
-            .query(
-                query,
-                &[
-                    &class_code,
-                    &instrument_status,
-                ],
-            )
+            .query(query, &[&class_code, &instrument_status])
             .await
             .map_err(|e| {
                 error!(
@@ -280,22 +274,22 @@ impl Db {
                 );
                 e
             })?;
-    
+
         // Print column names
         println!(
             "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
             "class_code", "status", "sec_code", "instr_short_name", "update_timestamp"
         );
-    
+
         // Print the dividing line
         println!(
             "{:-<12}-+-{:-<32}-+-{:-<12}-+-{:-<20}-+-{:<30}-",
             "", "", "", "", ""
         );
-    
+
         // Creating a vector for Instruments
         let mut instruments: Vec<Instruments> = Vec::new();
-    
+
         // Processing the results SQL request
         for row in rows {
             let class_code: String = row.get("class_code");
@@ -303,7 +297,7 @@ impl Db {
             let sec_code: String = row.get("sec_code");
             let instr_short_name: String = row.get("instr_short_name");
             let update_timestamp: DateTime<Local> = row.get("update_timestamp");
-    
+
             println!(
                 "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
                 class_code, instrument_status, sec_code, instr_short_name, update_timestamp
@@ -311,17 +305,16 @@ impl Db {
 
             let hysteresis_percentage = 1.0; // %
             let hysteresis_periods = 5; // periods
-            let crossover_signal =
-                CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
-    
+            let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
+
             let instr = Instruments {
-                class_code,
-                instrument_status,
+                // class_code,
+                // instrument_status,
                 sec_code,
-                instr_short_name,
+                // instr_short_name,
                 crossover_signal,
             };
-    
+
             instruments.push(instr);
         }
         Ok(instruments)
@@ -370,14 +363,7 @@ impl Db {
 
         // Executing a request with parameters
         let rows = conn
-            .query(
-                query,
-                &[
-                    &period_len,
-                    &interval,
-                    &sec_code,
-                ],
-            )
+            .query(query, &[&period_len, &interval, &sec_code])
             .await
             .map_err(|e| {
                 error!(

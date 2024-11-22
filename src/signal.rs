@@ -1,4 +1,5 @@
 use tracing::info;
+
 /// Сигнал торговли
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Signal {
@@ -49,7 +50,10 @@ impl CrossoverSignal {
         let ema_diff = short_ema - long_ema;
         let ema_percentage = ema_diff / long_ema * 100.0;
         info!("Start update signal");
-        info!("short_ema: {}, long_ema: {}, ema_percentage: {}, hysteresis_percentage: {}", short_ema, long_ema, ema_percentage, self.hysteresis_percentage);
+        info!(
+            "short_ema: {}, long_ema: {}, ema_percentage: {}, hysteresis_percentage: {}",
+            short_ema, long_ema, ema_percentage, self.hysteresis_percentage
+        );
 
         // Определяем новое состояние на основе процентной разницы EMA и гистерезиса
         info!("Check new state");
