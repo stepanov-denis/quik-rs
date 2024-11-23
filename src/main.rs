@@ -29,7 +29,7 @@ async fn main() -> eframe::Result<()> {
         let trade = bot::trade(command_receiver).await;
         match trade {
             Ok(_) => {}
-            Err(e) => error!("Something went wrong, bot error: {}", e),
+            Err(e) => error!("something went wrong, bot error: {}", e),
         }
     });
 

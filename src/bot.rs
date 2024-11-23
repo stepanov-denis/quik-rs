@@ -1,5 +1,3 @@
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use crate::app::AppCommand;
 use crate::ema;
 use crate::psql;
@@ -36,10 +34,10 @@ fn process_transaction(terminal_guard: TokioMutexGuard<'_, Terminal>, transactio
 
     match result {
         Ok(_) => {
-            info!("Transaction successfully sent: {}", transaction_str);
+            info!("transaction successfully sent: {}", transaction_str);
         }
         Err(e) => {
-            error!("Failed to send transaction '{}': {}", transaction_str, e);
+            error!("failed to send transaction '{}': {}", transaction_str, e);
         }
     }
 }
@@ -90,21 +88,21 @@ pub async fn trade(
             Some(command) = command_receiver.recv() => {
                 match command {
                     AppCommand::Shutdown => {
-                        info!("Shutdown signal");
+                        info!("shutdown signal");
                         // Access to terminal via Mutex
                         let terminal_guard = terminal.lock().await;
 
                         if let Err(err) = terminal_guard.unsubscribe_orders() {
-                            eprintln!("Error unsubscribing from orders: {}", err);
+                            eprintln!("error unsubscribing from orders: {}", err);
                         }
                         if let Err(err) = terminal_guard.unsubscribe_trades() {
-                            eprintln!("Error unsubscribing from trades: {}", err);
+                            eprintln!("error unsubscribing from trades: {}", err);
                         }
                         if let Err(err) = terminal_guard.disconnect() {
-                            eprintln!("Error disconnecting: {}", err);
+                            eprintln!("error disconnecting: {}", err);
                         }
 
-                        info!("Shutdown sequence completed");
+                        info!("shutdown sequence completed");
                         break;
                     }
                 }
@@ -165,7 +163,7 @@ pub async fn trade(
                                     Ok(str) => {
                                         process_transaction(terminal_guard, &str);
                                     }
-                                    Err(e) => error!("Create transaction_str error: {}", e)
+                                    Err(e) => error!("create transaction_str error: {}", e)
                                 }
                             }
                             Signal::Sell => {
@@ -176,13 +174,14 @@ pub async fn trade(
                                     Ok(str) => {
                                         process_transaction(terminal_guard, &str);
                                     }
-                                    Err(e) => error!("Create transaction_str error: {}", e)
+                                    Err(e) => error!("create transaction_str error: {}", e)
                                 }
                             }
                         }
                     }
                 }
                 // Pause before the next iteration
+                info!("sleep");
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
@@ -193,7 +192,7 @@ pub async fn trade(
                     }
                     Err(err) => {
                         // Error Handling
-                        error!("Bot error: {}", err);
+                        error!("bot error: {}", err);
                         break;
                     }
                 }

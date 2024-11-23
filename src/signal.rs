@@ -1,34 +1,33 @@
 use tracing::info;
 
-/// Сигнал торговли
+/// Trading signal
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Signal {
-    Buy,  // Золотой крест - сигнал на покупку
-    Sell, // Крест смерти - сигнал на продажу
+    Buy,
+    Sell,
 }
 
-/// Состояние пересечения EMA
+/// The state of the EMA intersection
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum State {
-    Above,   // Короткая EMA выше длинной EMA
-    Below,   // Короткая EMA ниже длинной EMA
-    Between, // В пределах гистерезиса (нет четкого сигнала)
+    Above,   // The short EMA is higher than the long EMA
+    Below,   // The short EMA is below the long EMA
+    Between, // Within hysteresis (no clear signal)
 }
 
-/// Структура для генерации торговых сигналов с гистерезисом
+/// Structure for generating trading signals with hysteresis
 pub struct CrossoverSignal {
-    hysteresis_percentage: f64,  // Гистерезис в процентах
-    hysteresis_periods: usize,   // Гистерезис по времени (число периодов)
-    state: State,                // Текущее состояние
-    time_in_state: usize,        // Время в текущем состоянии
-    last_signal: Option<Signal>, // Последний отправленный сигнал
+    hysteresis_percentage: f64,
+    hysteresis_periods: usize,
+    state: State,
+    time_in_state: usize,
+    last_signal: Option<Signal>,
 }
 
 impl CrossoverSignal {
-    /// Создает новую структуру CrossoverSignal с заданными параметрами гистерезиса
-    ///
-    /// hysteresis_percentage - процентный порог для разницы EMA, чтобы вызвать изменение состояния.
-    /// hysteresis_periods - количество последовательных периодов, в течение которых условие должно выполняться перед отправкой сигнала.
+    /// Creates a new CrossoverSignal structure with the given hysteresis parameters:
+    /// hysteresis_percentage - the percentage threshold for the EMA difference to trigger a state change.
+    /// hysteresis_periods - the number of consecutive periods the condition must be met before the signal is sent.
     pub fn new(hysteresis_percentage: f64, hysteresis_periods: usize) -> Self {
         Self {
             hysteresis_percentage,
@@ -39,47 +38,47 @@ impl CrossoverSignal {
         }
     }
 
-    /// Обновляет внутреннее состояние с последними значениями короткой и длинной EMA.
-    /// Возвращает опциональный Signal, если сгенерирован сигнал на покупку или продажу.
+    /// Updates the internal state with the latest short and long EMA values.
+    /// Returns an optional Signal if a buy or sell signal was generated.
     pub fn update(&mut self, short_ema: f64, long_ema: f64) -> Option<Signal> {
         if long_ema == 0.0 {
-            // Избежать деления на ноль
+            // Avoid division by zero
             return None;
         }
 
         let ema_diff = short_ema - long_ema;
         let ema_percentage = ema_diff / long_ema * 100.0;
-        info!("Start update signal");
+        info!("start update signal");
         info!(
             "short_ema: {}, long_ema: {}, ema_percentage: {}, hysteresis_percentage: {}",
             short_ema, long_ema, ema_percentage, self.hysteresis_percentage
         );
 
-        // Определяем новое состояние на основе процентной разницы EMA и гистерезиса
-        info!("Check new state");
+        // Determine new state based on EMA percentage difference and hysteresis
+        info!("check new state");
         let new_state = if ema_percentage > self.hysteresis_percentage {
-            info!("State above");
+            info!("state above");
             State::Above
         } else if ema_percentage < -self.hysteresis_percentage {
-            info!("State below");
+            info!("state below");
             State::Below
         } else {
-            info!("State between");
+            info!("state between");
             State::Between
         };
 
-        info!("Check change state");
-        // Проверяем, изменилось ли состояние
+        info!("check change state");
+        // Check if the state has changed
         if new_state == self.state {
-            // Состояние не изменилось, увеличиваем время в состоянии
+            // The state has not changed, we increase the time in the state
             self.time_in_state += 1;
         } else {
-            // Состояние изменилось, сбрасываем время в состоянии
+            // State has changed, reset time in state
             self.state = new_state;
             self.time_in_state = 1;
         }
 
-        // Проверяем, превышает ли время в текущем состоянии гистерезис по времени
+        // Check if the time in the current state exceeds the time hysteresis
         match self.state {
             State::Above => {
                 if self.time_in_state >= self.hysteresis_periods {
@@ -98,13 +97,13 @@ impl CrossoverSignal {
                 }
             }
             State::Between => {
-                // Нет сигнала в состоянии "Between"
+                // No signal in "Between" state
                 self.time_in_state = 0;
             }
         }
 
-        info!("No new signal");
+        info!("no new signal");
 
-        None // Нет нового сигнала
+        None
     }
 }

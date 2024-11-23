@@ -36,11 +36,11 @@ impl eframe::App for MyApp {
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.allowed_to_close {
                 // Send the shutdown signal for QUIK to main
-                info!("Main loop has been signaled to shut down");
+                info!("main loop has been signaled to shut down");
 
                 // Отправляем команду на завершение
                 if let Err(err) = self.command_sender.send(AppCommand::Shutdown) {
-                    error!("Failed to send shutdown command: {}", err);
+                    error!("failed to send shutdown command: {}", err);
                 }
 
                 // self.shutdown_signal.store(true, Ordering::Relaxed);

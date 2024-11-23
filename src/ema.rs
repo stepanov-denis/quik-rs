@@ -19,7 +19,7 @@ impl fmt::Display for EmaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EmaError::Bb8(err) => write!(f, "{}", err),
-            EmaError::NoData => write!(f, "There is not enough data to calculate the EMA"),
+            EmaError::NoData => write!(f, "there is not enough data to calculate the EMA"),
         }
     }
 }
@@ -42,7 +42,7 @@ impl Ema {
         period_len: f64,
         period_quantity: usize,
     ) -> Result<f64, EmaError> {
-        info!("Start calculate EMA");
+        info!("start calculate EMA");
         info!(
             "instrument_code: {}, interval: {}, period_len: {}, period_quantity: {}",
             sec_code, interval, period_len, period_quantity

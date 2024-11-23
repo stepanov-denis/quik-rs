@@ -37,7 +37,7 @@ impl Db {
         // Create the manager
         let manager = PostgresConnectionManager::new_from_stringlike(connection_str, NoTls)
             .map_err(|e| {
-                error!("Error creating PostgresConnectionManager: {:?}", e);
+                error!("error creating PostgresConnectionManager: {:?}", e);
                 e
             })?;
 
@@ -48,7 +48,7 @@ impl Db {
             .build(manager)
             .await
             .map_err(|e| {
-                error!("Error building connection pool: {:?}", e);
+                error!("error building connection pool: {:?}", e);
                 e
             })?;
 
@@ -61,7 +61,7 @@ impl Db {
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
-            error!("Error get a connection from the pool: {:?}", e);
+            error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
@@ -96,7 +96,7 @@ impl Db {
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
-            error!("Error get a connection from the pool: {:?}", e);
+            error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
@@ -117,7 +117,7 @@ impl Db {
                 last_volume DECIMAL(15,6),
                 last_price_time TIME,
                 trade_date DATE,
-                update_timestamp TIMESTAMP DEFAULT NOW()
+                update_timestamptz TIMESTAMPTZ DEFAULT NOW()
             );
         ";
 
@@ -133,7 +133,7 @@ impl Db {
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
-            error!("Error get a connection from the pool: {:?}", e);
+            error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
@@ -188,7 +188,7 @@ impl Db {
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
-            error!("Error get a connection from the pool: {:?}", e);
+            error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
@@ -251,17 +251,17 @@ impl Db {
     ) -> Result<Vec<Instruments>, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
-            error!("Error get a connection from the pool: {:?}", e);
+            error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
         let query = "
-        SELECT DISTINCT ON (instrument_code)
-            class_code, instrument_status, sec_code, instrument, update_timestamp
+        SELECT DISTINCT ON (sec_code)
+            class_code, instrument_status, sec_code, instr_short_name, update_timestamptz
         FROM historical_trades
         WHERE class_code = $1
           AND instrument_status = $2
-        ORDER BY sec_code, update_timestamp DESC
+        ORDER BY sec_code, update_timestamptz DESC
     ";
 
         let rows = conn
@@ -269,7 +269,7 @@ impl Db {
             .await
             .map_err(|e| {
                 error!(
-                    "Error executing the request to get a list of tools: {:?}",
+                    "error executing the request to get a list of tools: {:?}",
                     e
                 );
                 e
@@ -278,12 +278,12 @@ impl Db {
         // Print column names
         println!(
             "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
-            "class_code", "status", "sec_code", "instr_short_name", "update_timestamp"
+            "class_code", "status", "sec_code", "instr_short_name", "update_timestamptz"
         );
 
         // Print the dividing line
         println!(
-            "{:-<12}-+-{:-<32}-+-{:-<12}-+-{:-<20}-+-{:<30}-",
+            "{:-<12}-+-{:-<32}-+-{:-<12}-+-{:-<20}-+-{:-<30}-",
             "", "", "", "", ""
         );
 
@@ -296,11 +296,11 @@ impl Db {
             let instrument_status: String = row.get("instrument_status");
             let sec_code: String = row.get("sec_code");
             let instr_short_name: String = row.get("instr_short_name");
-            let update_timestamp: DateTime<Local> = row.get("update_timestamp");
+            let update_timestamptz: DateTime<Local> = row.get("update_timestamptz");
 
             println!(
                 "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
-                class_code, instrument_status, sec_code, instr_short_name, update_timestamp
+                class_code, instrument_status, sec_code, instr_short_name, update_timestamptz
             );
 
             let hysteresis_percentage = 1.0; // %
@@ -329,7 +329,7 @@ impl Db {
     ) -> Result<Vec<DataForEma>, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
-            error!("Error get a connection from the pool: {:?}", e);
+            error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
@@ -338,18 +338,18 @@ impl Db {
                 SELECT
                     ht.*,
                     NOW() - FLOOR(
-                        EXTRACT(EPOCH FROM NOW() - ht.update_timestamp) / $1::double precision
+                        EXTRACT(EPOCH FROM NOW() - ht.update_timestamptz) / $1::double precision
                     ) * $1::double precision * INTERVAL '1 second' AS period_start
                 FROM
                     historical_trades ht
                 WHERE
-                    ht.instrument_code = $3
-                    AND ht.update_timestamp >= NOW() - $2::double precision * INTERVAL '1 second'
+                    ht.sec_code = $3
+                    AND ht.update_timestamptz >= NOW() - $2::double precision * INTERVAL '1 second'
             )
             SELECT
                 period_start,
-                (ARRAY_AGG(last_price ORDER BY update_timestamp ASC))[1] AS open_price,
-                (ARRAY_AGG(last_price ORDER BY update_timestamp DESC))[1] AS close_price,
+                (ARRAY_AGG(last_price ORDER BY update_timestamptz ASC))[1] AS open_price,
+                (ARRAY_AGG(last_price ORDER BY update_timestamptz DESC))[1] AS close_price,
                 MIN(last_price) AS min_price,
                 MAX(last_price) AS max_price,
                 SUM(last_volume) AS period_volume
@@ -367,7 +367,7 @@ impl Db {
             .await
             .map_err(|e| {
                 error!(
-                    "Error in executing the request to receive data for calculating the EMA: {:?}",
+                    "error in executing the request to receive data for calculating the EMA: {:?}",
                     e
                 );
                 e
