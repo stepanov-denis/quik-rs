@@ -217,28 +217,20 @@ impl Db {
 
     // Инициализация базы данных
     pub async fn init(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
-        let create_current_trades = self.create_current_trades().await;
-        match create_current_trades {
-            Ok(_) => {}
-            Err(e) => error!("create table current_trades error: {}", e),
+        if let Err(e) = self.create_current_trades().await {
+            error!("create table current_trades error: {}", e);
         }
 
-        let create_historical_trades = self.create_historical_trades().await;
-        match create_historical_trades {
-            Ok(_) => {}
-            Err(e) => error!("create table historical_trades error: {}", e),
+        if let Err(e) = self.create_historical_trades().await {
+            error!("create table historical_trades error: {}", e);
         }
 
-        let insert_into_historical = self.insert_into_historical().await;
-        match insert_into_historical {
-            Ok(_) => {}
-            Err(e) => error!("create function insert_into_historical error: {}", e),
+        if let Err(e) = self.insert_into_historical().await {
+            error!("create function insert_into_historical error: {}", e);
         }
 
-        let before_update_current_trades = self.before_update_current_trades().await;
-        match before_update_current_trades {
-            Ok(_) => {}
-            Err(e) => error!("create trigger before_update_current_trades error: {}", e),
+        if let Err(e) = self.before_update_current_trades().await {
+            error!("create trigger before_update_current_trades error: {}", e);
         }
 
         Ok(())

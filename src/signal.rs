@@ -81,19 +81,19 @@ impl CrossoverSignal {
         // Check if the time in the current state exceeds the time hysteresis
         match self.state {
             State::Above => {
-                if self.time_in_state >= self.hysteresis_periods {
-                    if self.last_signal != Some(Signal::Buy) {
-                        self.last_signal = Some(Signal::Buy);
-                        return Some(Signal::Buy);
-                    }
+                if self.time_in_state >= self.hysteresis_periods
+                    && self.last_signal != Some(Signal::Buy)
+                {
+                    self.last_signal = Some(Signal::Buy);
+                    return Some(Signal::Buy);
                 }
             }
             State::Below => {
-                if self.time_in_state >= self.hysteresis_periods {
-                    if self.last_signal != Some(Signal::Sell) {
-                        self.last_signal = Some(Signal::Sell);
-                        return Some(Signal::Sell);
-                    }
+                if self.time_in_state >= self.hysteresis_periods
+                    && self.last_signal != Some(Signal::Sell)
+                {
+                    self.last_signal = Some(Signal::Sell);
+                    return Some(Signal::Sell);
                 }
             }
             State::Between => {

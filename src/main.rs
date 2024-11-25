@@ -6,7 +6,6 @@ use eframe::egui;
 // };
 use tokio::sync::mpsc;
 use tracing::error;
-use tracing_subscriber;
 mod app;
 mod bot;
 mod ema;
@@ -26,10 +25,8 @@ async fn main() -> eframe::Result<()> {
     // Spawn your asynchronous task using tokio::spawn
     // let loop_shutdown_signal = Arc::clone(&shutdown_signal);
     tokio::spawn(async move {
-        let trade = bot::trade(command_receiver).await;
-        match trade {
-            Ok(_) => {}
-            Err(e) => error!("something went wrong, bot error: {}", e),
+        if let Err(e) = bot::trade(command_receiver).await {
+            error!("something went wrong, bot error: {}", e);
         }
     });
 

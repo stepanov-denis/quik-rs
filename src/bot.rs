@@ -3,7 +3,7 @@ use crate::ema;
 use crate::psql;
 use crate::quik::Terminal;
 use crate::signal::Signal;
-// use egui::mutex::MutexGuard;
+use chrono::{Datelike, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::{
     // atomic::AtomicBool,
@@ -12,6 +12,7 @@ use std::sync::{
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard as TokioMutexGuard;
+use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 
 fn transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static str> {
@@ -40,6 +41,37 @@ fn process_transaction(terminal_guard: TokioMutexGuard<'_, Terminal>, transactio
             error!("failed to send transaction '{}': {}", transaction_str, e);
         }
     }
+}
+
+/// Checks whether the specified day is a weekday (Monday - Friday).
+fn is_weekday(weekday: Weekday) -> bool {
+    matches!(
+        weekday,
+        Weekday::Mon | Weekday::Tue | Weekday::Wed | Weekday::Thu | Weekday::Fri
+    )
+}
+
+/// Checks whether the current time is after the start of trading (01:05).
+fn is_after_start_time(hour: u32, minute: u32) -> bool {
+    hour > 1 || (hour == 1 && minute >= 5)
+}
+
+/// Checks whether the current time is until the end of trading (23:00).
+fn is_before_end_time(hour: u32) -> bool {
+    hour < 23
+}
+
+/// Checks whether the specified time corresponds to the trading schedule.
+/// QUIK Junior's work schedule at the Technical Center:
+/// * 4:05 UTC+03 - start of the MOEX Stock Market trading session emulator (Main Market sector),
+///   active operations are available (placing and withdrawing orders).
+/// * 02:00 UTC+03 - stopping the emulator of the trading session of the Moscow Stock Exchange Stock Market (sector "Main Market"),
+///   the end of the application acceptance and execution period. Automatic withdrawal of all unsatisfied applications.
+fn is_trading_time() -> bool {
+    let now = Utc::now();
+    is_weekday(now.weekday())
+        && is_after_start_time(now.hour(), now.minute())
+        && is_before_end_time(now.hour())
 }
 
 pub async fn trade(
@@ -75,13 +107,13 @@ pub async fn trade(
         .await?;
 
     // Preparing for trading
-    let short_period_quantity = 8 as usize;
-    let short_period_len: f64 = (1 * 60) as f64;
-    let short_interval: f64 = short_period_quantity as f64 * short_period_len as f64;
+    let short_period_quantity: usize = 8;
+    let short_period_len: f64 = 60.0;
+    let short_interval: f64 = short_period_quantity as f64 * short_period_len;
 
-    let long_period_quantity = 21 as usize;
-    let long_period_len: f64 = (1 * 60) as f64;
-    let long_interval: f64 = long_period_quantity as f64 * long_period_len as f64;
+    let long_period_quantity: usize = 21;
+    let long_period_len: f64 = 60.0;
+    let long_interval: f64 = long_period_quantity as f64 * long_period_len;
 
     loop {
         tokio::select! {
@@ -93,13 +125,13 @@ pub async fn trade(
                         let terminal_guard = terminal.lock().await;
 
                         if let Err(err) = terminal_guard.unsubscribe_orders() {
-                            eprintln!("error unsubscribing from orders: {}", err);
+                            error!("error unsubscribing from orders: {}", err);
                         }
                         if let Err(err) = terminal_guard.unsubscribe_trades() {
-                            eprintln!("error unsubscribing from trades: {}", err);
+                            error!("error unsubscribing from trades: {}", err);
                         }
                         if let Err(err) = terminal_guard.disconnect() {
-                            eprintln!("error disconnecting: {}", err);
+                            error!("error disconnecting: {}", err);
                         }
 
                         info!("shutdown sequence completed");
@@ -108,81 +140,86 @@ pub async fn trade(
                 }
             },
             result = async {
-                for instrument in &mut instruments {
-                    // Get access to the terminal
-                    let terminal_guard = terminal.lock().await;
+                if is_trading_time() {
+                    for instrument in &mut instruments {
+                        // Get access to the terminal
+                        let terminal_guard = terminal.lock().await;
 
-                    // Calculate the short EMA
-                    let short_ema_result = ema::Ema::calc(
-                        &database,
-                        &instrument.sec_code,
-                        short_interval,
-                        short_period_len,
-                        short_period_quantity,
-                    ).await;
+                        // Calculate the short EMA
+                        let short_ema_result = ema::Ema::calc(
+                            &database,
+                            &instrument.sec_code,
+                            short_interval,
+                            short_period_len,
+                            short_period_quantity,
+                        ).await;
 
-                    let short_ema = match short_ema_result {
-                        Ok(ema) => {
-                            info!("short_ema: {}", ema);
-                            ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
-
-                    // Calculate the long EMA
-                    let long_ema_result = ema::Ema::calc(
-                        &database,
-                        &instrument.sec_code,
-                        long_interval,
-                        long_period_len,
-                        long_period_quantity,
-                    ).await;
-
-                    let long_ema = match long_ema_result {
-                        Ok(ema) => {
-                            info!("long_ema: {}", ema);
-                            ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
-
-                    // Updating the golden cross/death cross signal
-                    if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
-                        match signal {
-                            Signal::Buy => {
-                                info!("{} => {:?}", instrument.sec_code, signal);
-                                let operation = "B";
-                                let transaction_str = transaction_str(&instrument.sec_code, operation);
-                                match transaction_str {
-                                    Ok(str) => {
-                                        process_transaction(terminal_guard, &str);
-                                    }
-                                    Err(e) => error!("create transaction_str error: {}", e)
-                                }
+                        let short_ema = match short_ema_result {
+                            Ok(ema) => {
+                                info!("short_ema: {}", ema);
+                                ema
                             }
-                            Signal::Sell => {
-                                info!("{} => {:?}", instrument.sec_code, signal);
-                                let operation = "S";
-                                let transaction_str = transaction_str(&instrument.sec_code, operation);
-                                match transaction_str {
-                                    Ok(str) => {
-                                        process_transaction(terminal_guard, &str);
+                            Err(e) => {
+                                error!("{}", e);
+                                continue;
+                            }
+                        };
+
+                        // Calculate the long EMA
+                        let long_ema_result = ema::Ema::calc(
+                            &database,
+                            &instrument.sec_code,
+                            long_interval,
+                            long_period_len,
+                            long_period_quantity,
+                        ).await;
+
+                        let long_ema = match long_ema_result {
+                            Ok(ema) => {
+                                info!("long_ema: {}", ema);
+                                ema
+                            }
+                            Err(e) => {
+                                error!("{}", e);
+                                continue;
+                            }
+                        };
+
+                        // Updating the golden cross/death cross signal
+                        if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
+                            match signal {
+                                Signal::Buy => {
+                                    info!("{} => {:?}", instrument.sec_code, signal);
+                                    let operation = "B";
+                                    let transaction_str = transaction_str(&instrument.sec_code, operation);
+                                    match transaction_str {
+                                        Ok(str) => {
+                                            process_transaction(terminal_guard, &str);
+                                        }
+                                        Err(e) => error!("create transaction_str error: {}", e)
                                     }
-                                    Err(e) => error!("create transaction_str error: {}", e)
+                                }
+                                Signal::Sell => {
+                                    info!("{} => {:?}", instrument.sec_code, signal);
+                                    let operation = "S";
+                                    let transaction_str = transaction_str(&instrument.sec_code, operation);
+                                    match transaction_str {
+                                        Ok(str) => {
+                                            process_transaction(terminal_guard, &str);
+                                        }
+                                        Err(e) => error!("create transaction_str error: {}", e)
+                                    }
                                 }
                             }
                         }
                     }
+                } else {
+                    info!("trading is paused, waiting for the next interval to check trading availability");
                 }
+
                 // Pause before the next iteration
-                info!("sleep");
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                info!("sleep 60 seconds");
+                sleep(Duration::from_secs(60)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {

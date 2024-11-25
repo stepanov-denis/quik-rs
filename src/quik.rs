@@ -993,9 +993,8 @@ unsafe extern "C" fn connection_status_callback(
         let c_str = CStr::from_ptr(error_message);
         let bytes = c_str.to_bytes();
 
-        match WINDOWS_1251.decode(bytes) {
-            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
-        }
+        let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
+        decoded_str.into_owned().to_owned()
     } else {
         String::from("error_message is null")
     };
@@ -1027,9 +1026,8 @@ unsafe extern "C" fn transaction_reply_callback(
         let c_str = CStr::from_ptr(error_message);
         let bytes = c_str.to_bytes();
 
-        match WINDOWS_1251.decode(bytes) {
-            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
-        }
+        let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
+        decoded_str.into_owned().to_owned()
     } else {
         String::from("error_message is null")
     };
@@ -1065,9 +1063,8 @@ unsafe extern "C" fn order_status_callback(
         let c_str = CStr::from_ptr(class_code);
         let bytes = c_str.to_bytes();
 
-        match WINDOWS_1251.decode(bytes) {
-            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
-        }
+        let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
+        decoded_str.into_owned().to_owned()
     } else {
         String::from("class_code is null")
     };
@@ -1076,9 +1073,8 @@ unsafe extern "C" fn order_status_callback(
         let c_str = CStr::from_ptr(sec_code);
         let bytes = c_str.to_bytes();
 
-        match WINDOWS_1251.decode(bytes) {
-            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
-        }
+        let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
+        decoded_str.into_owned().to_owned()
     } else {
         String::from("sec_code is null")
     };
@@ -1113,9 +1109,8 @@ unsafe extern "C" fn trade_status_callback(
         let c_str = CStr::from_ptr(class_code);
         let bytes = c_str.to_bytes();
 
-        match WINDOWS_1251.decode(bytes) {
-            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
-        }
+        let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
+        decoded_str.into_owned().to_owned()
     } else {
         String::from("class_code is null")
     };
@@ -1124,9 +1119,8 @@ unsafe extern "C" fn trade_status_callback(
         let c_str = CStr::from_ptr(sec_code);
         let bytes = c_str.to_bytes();
 
-        match WINDOWS_1251.decode(bytes) {
-            (decoded_str, _, _) => decoded_str.to_owned().into_owned(),
-        }
+        let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
+        decoded_str.into_owned().to_owned()
     } else {
         String::from("sec_code is null")
     };
