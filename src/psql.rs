@@ -55,6 +55,24 @@ impl Db {
         Ok(Db { pool })
     }
 
+    /// Set default transaction isolation level for database
+    /// It's worked for the next session
+    pub async fn set_transaction_isolation(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        // Set default transaction isolation level
+        let query = "ALTER DATABASE postgres SET default_transaction_isolation TO 'serializable';";
+
+        // Executing the command to set default transaction isolation level
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
+
     /// Creating a table of current trades
     pub async fn create_current_trades(
         &self,
@@ -217,6 +235,9 @@ impl Db {
 
     // Инициализация базы данных
     pub async fn init(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        if let Err(e) = self.set_transaction_isolation().await {
+            error!("set default transaction isolation level error: {}", e);
+        }
         if let Err(e) = self.create_current_trades().await {
             error!("create table current_trades error: {}", e);
         }

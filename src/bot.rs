@@ -1,3 +1,4 @@
+//! # bot work for algo trading
 use crate::app::AppCommand;
 use crate::ema;
 use crate::psql;
@@ -5,10 +6,7 @@ use crate::quik::Terminal;
 use crate::signal::Signal;
 use chrono::{Datelike, Timelike, Utc, Weekday};
 use std::error::Error;
-use std::sync::{
-    // atomic::AtomicBool,
-    Arc,
-};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard as TokioMutexGuard;
