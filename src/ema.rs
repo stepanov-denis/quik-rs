@@ -1,6 +1,7 @@
 //! # Calculates the Exponential Moving Average (EMA), also known as an exponentially weighted moving average (EWMA).
 use crate::psql::Db;
 use bb8::RunError;
+use rust_decimal::prelude::ToPrimitive;
 use std::error;
 use std::fmt;
 use ta::indicators::ExponentialMovingAverage;
@@ -38,25 +39,23 @@ impl Ema {
     pub async fn calc(
         database: &Db,
         sec_code: &str,
-        interval: f64,
-        period_len: f64,
-        period_quantity: usize,
+        timeframe: i32,
+        number_of_candles: i32,
     ) -> Result<f64, EmaError> {
         info!("start calculate EMA");
         info!(
-            "instrument_code: {}, interval: {}, period_len: {}, period_quantity: {}",
-            sec_code, interval, period_len, period_quantity
+            "instrument_code: {}, timeframe: {} minutes, number_of_candles: {}",
+            sec_code, timeframe, number_of_candles
         );
         let data_for_ema = database
-            .get_data_for_ema(sec_code, interval, period_len)
+            .get_candles(sec_code, timeframe, number_of_candles)
             .await?;
-        // info!("data_for_ema: {:?}", data_for_ema);
-        let ema_period = data_for_ema.len();
+        let ema_period= data_for_ema.len();
         info!(
-            "ema_period: {}, period_quantity: {}",
-            ema_period, period_quantity
+            "ema_period: {}, number_of_candles: {}",
+            ema_period, number_of_candles
         );
-        if ema_period != period_quantity {
+        if ema_period as i32 != number_of_candles{
             return Err(EmaError::NoData);
         }
         let mut ema = ExponentialMovingAverage::new(ema_period).unwrap();
@@ -71,12 +70,9 @@ impl Ema {
                 .volume(data.volume)
                 .build()
                 .unwrap();
-            // info!("item = {:?}", item);
 
             ema_value = ema.next(&item);
-            // info!("ema next = {}", ema_value);
         }
-        // info!("ema value: {}", ema);
 
         Ok(ema_value)
     }

@@ -2,13 +2,13 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc, NaiveDateTime};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
 
 #[derive(Debug)]
-pub struct DataForEma {
+pub struct Candle {
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -135,7 +135,7 @@ impl Db {
                 last_volume DECIMAL(15,6),
                 last_price_time TIME,
                 trade_date DATE,
-                update_timestamptz TIMESTAMPTZ DEFAULT NOW()
+                update_timestamptz TIMESTAMPTZ DEFAULT NOW() -- timestamp with time zone
             );
         ";
 
@@ -334,49 +334,54 @@ impl Db {
     }
 
     /// Get trading data for calculating the EMA
-    pub async fn get_data_for_ema(
+    pub async fn get_candles(
         &self,
         sec_code: &str,
-        interval: f64,
-        period_len: f64,
-    ) -> Result<Vec<DataForEma>, RunError<bb8_postgres::tokio_postgres::Error>> {
+        timeframe: i32,
+        number_of_candles: i32,
+    ) -> Result<Vec<Candle>, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
             error!("error get a connection from the pool: {:?}", e);
             e
         })?;
-
+    
         let query = "
-            WITH period_data AS (
+            WITH intervals AS (
                 SELECT
-                    ht.*,
-                    NOW() - FLOOR(
-                        EXTRACT(EPOCH FROM NOW() - ht.update_timestamptz) / $1::double precision
-                    ) * $1::double precision * INTERVAL '1 second' AS period_start
-                FROM
-                    historical_trades ht
+                    generate_series(
+                        date_trunc('minute', now() AT TIME ZONE 'UTC') - (($2::integer * $1::integer) || ' minutes')::interval,
+                        date_trunc('minute', now() AT TIME ZONE 'UTC'),
+                        ($1::integer || ' minutes')::interval
+                    ) AS interval_start
+            ),
+            candle_data AS (
+                SELECT
+                    interval_start,
+                    (SELECT last_price FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00') ORDER BY trade_date + last_price_time ASC LIMIT 1) AS open,
+                    (SELECT MAX(last_price) FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00')) AS high,
+                    (SELECT MIN(last_price) FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00')) AS low,
+                    (SELECT last_price FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00') ORDER BY trade_date + last_price_time DESC LIMIT 1) AS close,
+                    (SELECT SUM(last_volume) FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00')) AS volume
+                FROM intervals
                 WHERE
-                    ht.sec_code = $3
-                    AND ht.update_timestamptz >= NOW() - $2::double precision * INTERVAL '1 second'
+                    interval_start::time BETWEEN '01:05:00' AND '23:00:00'
+            ),
+            final_candles AS (
+                SELECT interval_start, open, high, low, close, volume
+                FROM candle_data
+                -- WHERE open IS NOT NULL
+                ORDER BY interval_start DESC
+                LIMIT $2::integer
             )
-            SELECT
-                period_start,
-                (ARRAY_AGG(last_price ORDER BY update_timestamptz ASC))[1] AS open_price,
-                (ARRAY_AGG(last_price ORDER BY update_timestamptz DESC))[1] AS close_price,
-                MIN(last_price) AS min_price,
-                MAX(last_price) AS max_price,
-                SUM(last_volume) AS period_volume
-            FROM
-                period_data
-            GROUP BY
-                period_start
-            ORDER BY
-                period_start;
+            SELECT *
+            FROM final_candles
+            ORDER BY interval_start;
         ";
 
         // Executing a request with parameters
         let rows = conn
-            .query(query, &[&period_len, &interval, &sec_code])
+            .query(query, &[&timeframe, &number_of_candles, &sec_code])
             .await
             .map_err(|e| {
                 error!(
@@ -389,7 +394,7 @@ impl Db {
         // Print column names
         println!(
             "{:<30} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15}",
-            "period_start", "open_price", "close_price", "min_price", "max_price", "period_volume"
+            "interval_start", "open", "high", "low", "close", "volume"
         );
 
         // Print the dividing line
@@ -399,58 +404,58 @@ impl Db {
         );
 
         // Create a vector for DataItem
-        let mut data_item: Vec<DataForEma> = Vec::new();
+        let mut candles: Vec<Candle> = Vec::new();
 
         // Processing the results SQL request
         for row in rows {
-            let period_start: DateTime<Local> = row.get("period_start");
+            let interval_start: NaiveDateTime = row.get("interval_start");
 
-            let open_price: f64 = row
-                .try_get::<_, Decimal>("open_price")
+            let open: f64 = row
+                .try_get::<_, Decimal>("open")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let close_price: f64 = row
-                .try_get::<_, Decimal>("close_price")
+            let high: f64 = row
+                .try_get::<_, Decimal>("high")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let min_price: f64 = row
-                .try_get::<_, Decimal>("min_price")
+            let low: f64 = row
+                .try_get::<_, Decimal>("low")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let max_price: f64 = row
-                .try_get::<_, Decimal>("max_price")
+            let close: f64 = row
+                .try_get::<_, Decimal>("close")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
-            let period_volume: f64 = row
-                .try_get::<_, Decimal>("period_volume")
+            let volume: f64 = row
+                .try_get::<_, Decimal>("volume")
                 .ok()
                 .and_then(|dec| dec.to_f64())
                 .unwrap_or_default();
 
             println!(
                 "{:<30} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6}",
-                period_start, open_price, close_price, min_price, max_price, period_volume
+                interval_start, open, high, low, close, volume
             );
 
-            let item = DataForEma {
-                open: open_price,
-                high: max_price,
-                low: min_price,
-                close: close_price,
-                volume: period_volume,
+            let candle = Candle {
+                open,
+                high,
+                low,
+                close,
+                volume,
             };
 
-            data_item.push(item);
+            candles.push(candle);
         }
 
-        Ok(data_item)
+        Ok(candles)
     }
 }

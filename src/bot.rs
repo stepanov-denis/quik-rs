@@ -5,6 +5,7 @@ use crate::psql;
 use crate::quik::Terminal;
 use crate::signal::Signal;
 use chrono::{Datelike, Timelike, Utc, Weekday};
+use rust_decimal::prelude::ToPrimitive;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -105,13 +106,9 @@ pub async fn trade(
         .await?;
 
     // Preparing for trading
-    let short_period_quantity: usize = 8;
-    let short_period_len: f64 = 60.0;
-    let short_interval: f64 = short_period_quantity as f64 * short_period_len;
-
-    let long_period_quantity: usize = 21;
-    let long_period_len: f64 = 60.0;
-    let long_interval: f64 = long_period_quantity as f64 * long_period_len;
+    let timeframe: i32 = 60; // minutes
+    let short_number_of_candles: i32 = 8;
+    let long_number_of_candles: i32 = 21;
 
     loop {
         tokio::select! {
@@ -140,16 +137,16 @@ pub async fn trade(
             result = async {
                 if is_trading_time() {
                     for instrument in &mut instruments {
-                        // Get access to the terminal
+                        if instrument.sec_code == "SBER" {
+                                                    // Get access to the terminal
                         let terminal_guard = terminal.lock().await;
 
                         // Calculate the short EMA
                         let short_ema_result = ema::Ema::calc(
                             &database,
                             &instrument.sec_code,
-                            short_interval,
-                            short_period_len,
-                            short_period_quantity,
+                            timeframe,
+                            short_number_of_candles,
                         ).await;
 
                         let short_ema = match short_ema_result {
@@ -167,9 +164,8 @@ pub async fn trade(
                         let long_ema_result = ema::Ema::calc(
                             &database,
                             &instrument.sec_code,
-                            long_interval,
-                            long_period_len,
-                            long_period_quantity,
+                            timeframe,
+                            long_number_of_candles,
                         ).await;
 
                         let long_ema = match long_ema_result {
@@ -210,6 +206,8 @@ pub async fn trade(
                                 }
                             }
                         }
+                        }
+
                     }
                 } else {
                     info!("trading is paused, waiting for the next interval to check trading availability");
