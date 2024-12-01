@@ -4,16 +4,14 @@
 use crate::psql::Db;
 use crate::psql::Ema;
 use bb8::RunError;
-use chrono::TimeZone;
+use chrono::{DateTime, Utc};
 use eframe::egui;
 use egui::Color32;
+use egui_plot::GridMark;
 use egui_plot::{Line, Plot, PlotPoints};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tracing::{error, info};
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
-use chrono::format::strftime::StrftimeItems;
-use std::time::{Duration, UNIX_EPOCH};
 
 /// AppCommand represents the possible commands to control the QUIK Terminal state.
 ///
@@ -48,13 +46,16 @@ impl MyApp {
     ///
     /// A new instance of MyApp with the initial dialog state set to not show and close permission denied.
     pub fn new(command_sender: mpsc::UnboundedSender<AppCommand>, database: Arc<Db>) -> Self {
-        Self {
+        let app = Self {
             show_confirmation_dialog: false,
             allowed_to_close: false,
             command_sender,
             database,
             ema_data: Arc::new(Mutex::new(None)),
-        }
+        };
+
+        app.start_periodic_fetch();
+        app
     }
 
     /// Fetches EMA data asynchronously.
@@ -64,6 +65,21 @@ impl MyApp {
         tokio::spawn(async move {
             let ema = database.get_ema("SBER").await;
             *ema_data.lock().unwrap() = Some(ema);
+        });
+    }
+
+    /// Starts a periodic task to fetch EMA data.
+    fn start_periodic_fetch(&self) {
+        let database = Arc::clone(&self.database);
+        let ema_data = Arc::clone(&self.ema_data);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            loop {
+                info!("start periodic fetch");
+                interval.tick().await;
+                let ema = database.get_ema("SBER").await;
+                *ema_data.lock().unwrap() = Some(ema);
+            }
         });
     }
 }
@@ -87,13 +103,15 @@ impl eframe::App for MyApp {
 
             // Render the EMA plot if data is available
             if let Some(Ok(ema)) = &*self.ema_data.lock().unwrap() {
-                let short_ema: PlotPoints = ema.iter()
+                let short_ema: PlotPoints = ema
+                    .iter()
                     .map(|e| {
                         let datetime: DateTime<Utc> = e.timestamptz;
                         [datetime.timestamp_millis() as f64, e.short_ema]
                     })
                     .collect();
-                let long_ema: PlotPoints = ema.iter()
+                let long_ema: PlotPoints = ema
+                    .iter()
                     .map(|e| {
                         let datetime: DateTime<Utc> = e.timestamptz;
                         [datetime.timestamp_millis() as f64, e.long_ema]
@@ -101,14 +119,18 @@ impl eframe::App for MyApp {
                     .collect();
                 let short_line = Line::new(short_ema).color(Color32::BLUE).name("Short EMA");
                 let long_line = Line::new(long_ema).color(Color32::RED).name("Long EMA");
+
                 Plot::new("EMA Plot")
                     .view_aspect(2.0)
-                    .label_formatter(|name, value| {
-                        if !name.is_empty() {
-                            format!("FUCK: {}: {:.*}%", name, 1, value.y)
-                        } else {
-                            "".to_owned()
-                        }
+                    .x_axis_formatter(|mark: GridMark, _range: &std::ops::RangeInclusive<f64>| {
+                        let datetime = DateTime::from_timestamp_millis(mark.value as i64)
+                            .expect("Invalid timestamp");
+                        datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+                    })
+                    .label_formatter(|_name, value| {
+                        let datetime = DateTime::from_timestamp_millis(value.x as i64)
+                            .expect("Invalid timestamp");
+                        format!("{:.4}\n{}", value.y, datetime.format("%Y-%m-%d %H:%M:%S"))
                     })
                     .show(ui, |plot_ui| {
                         plot_ui.line(short_line);
