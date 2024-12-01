@@ -386,7 +386,7 @@ impl Db {
             WITH intervals AS (
                 SELECT
                     generate_series(
-                        date_trunc('minute', now() AT TIME ZONE 'UTC') - (($2::integer * $1::integer) || ' minutes')::interval,
+                        date_trunc('minute', now() AT TIME ZONE 'UTC') - ((($2::integer + 2) * $1::integer) || ' minutes')::interval,
                         date_trunc('minute', now() AT TIME ZONE 'UTC'),
                         ($1::integer || ' minutes')::interval
                     ) AS interval_start
