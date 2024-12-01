@@ -3,12 +3,17 @@
 //! It leverages the eframe library for GUI creation and tokio for asynchronous command handling.
 use crate::psql::Db;
 use crate::psql::Ema;
+use bb8::RunError;
+use chrono::TimeZone;
 use eframe::egui;
 use egui::Color32;
 use egui_plot::{Line, Plot, PlotPoints};
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
+use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use chrono::format::strftime::StrftimeItems;
+use std::time::{Duration, UNIX_EPOCH};
 
 /// AppCommand represents the possible commands to control the QUIK Terminal state.
 ///
@@ -29,6 +34,7 @@ pub struct MyApp {
     allowed_to_close: bool,
     command_sender: mpsc::UnboundedSender<AppCommand>,
     database: Arc<Db>,
+    ema_data: Arc<Mutex<Option<Result<Vec<Ema>, RunError<bb8_postgres::tokio_postgres::Error>>>>>,
 }
 
 impl MyApp {
@@ -47,7 +53,18 @@ impl MyApp {
             allowed_to_close: false,
             command_sender,
             database,
+            ema_data: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Fetches EMA data asynchronously.
+    fn fetch_ema_data(&self) {
+        let database = Arc::clone(&self.database);
+        let ema_data = Arc::clone(&self.ema_data);
+        tokio::spawn(async move {
+            let ema = database.get_ema("SBER").await;
+            *ema_data.lock().unwrap() = Some(ema);
+        });
     }
 }
 
@@ -63,58 +80,51 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Make some money");
 
-            // Create a new async block
-            let database = Arc::clone(&self.database);
-            let sec_code = String::from("SBER");
+            // Trigger data fetching if not yet fetched
+            if self.ema_data.lock().unwrap().is_none() {
+                self.fetch_ema_data();
+            }
 
-            // Spawning a new async task to fetch ema data
-            let (tx, mut rx) = tokio::sync::oneshot::channel();
-            tokio::spawn(async move {
-                let ema = database.get_ema(&sec_code).await;
-                let _ = tx.send(ema);
-            });
-
-            // Handle the received ema data
-            if let Ok(ema) = rx.try_recv() {
-                match ema {
-                    Ok(ema) => {
-                        // Extract short_ema and long_ema from ema data
-                        let short_ema: PlotPoints = ema.iter()
-                            .map(|e| [e.timestamptz.and_utc().timestamp() as f64, e.short_ema])
-                            .collect();
-                        let long_ema: PlotPoints = ema.iter()
-                            .map(|e| [e.timestamptz.and_utc().timestamp() as f64, e.long_ema])
-                            .collect();
-                        
-                        // Create lines for short_ema and long_ema
-                        let short_line = Line::new(short_ema);
-                        let long_line = Line::new(long_ema);
-
-                        // Display the plot
-                        Plot::new("EMA Plot")
-                            .view_aspect(2.0)
-                            .show(ui, |plot_ui| {
-                                plot_ui.line(short_line.color(Color32::BLUE).name("Short EMA"));
-                                plot_ui.line(long_line.color(Color32::RED).name("Long EMA"));
-                            });
-                    }
-                    Err(e) => error!("{}", e),
-                }
+            // Render the EMA plot if data is available
+            if let Some(Ok(ema)) = &*self.ema_data.lock().unwrap() {
+                let short_ema: PlotPoints = ema.iter()
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.short_ema]
+                    })
+                    .collect();
+                let long_ema: PlotPoints = ema.iter()
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.long_ema]
+                    })
+                    .collect();
+                let short_line = Line::new(short_ema).color(Color32::BLUE).name("Short EMA");
+                let long_line = Line::new(long_ema).color(Color32::RED).name("Long EMA");
+                Plot::new("EMA Plot")
+                    .view_aspect(2.0)
+                    .label_formatter(|name, value| {
+                        if !name.is_empty() {
+                            format!("FUCK: {}: {:.*}%", name, 1, value.y)
+                        } else {
+                            "".to_owned()
+                        }
+                    })
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(short_line);
+                        plot_ui.line(long_line);
+                    });
             }
         });
 
         // Handle close request from the viewport.
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.allowed_to_close {
-                // Log that the GUI has been signaled to shut down.
                 info!("GUI has been signaled to shut down");
-
-                // Attempt to send a shutdown command through the channel.
                 if let Err(err) = self.command_sender.send(AppCommand::Shutdown) {
                     error!("failed to send shutdown command: {}", err);
                 }
             } else {
-                // Cancel the close operation and show the confirmation dialog.
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.show_confirmation_dialog = true;
             }
@@ -127,13 +137,10 @@ impl eframe::App for MyApp {
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        // Handle 'No' button click to dismiss the dialog.
                         if ui.button("No").clicked() {
                             self.show_confirmation_dialog = false;
                             self.allowed_to_close = false;
                         }
-
-                        // Handle 'Yes' button click to allow closure.
                         if ui.button("Yes").clicked() {
                             self.show_confirmation_dialog = false;
                             self.allowed_to_close = true;

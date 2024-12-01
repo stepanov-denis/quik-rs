@@ -8,11 +8,12 @@ use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
 
+#[derive(Debug)]
 pub struct Ema {
     pub sec_code: String,
     pub short_ema: f64,
     pub long_ema: f64,
-    pub timestamptz: NaiveDateTime,
+    pub timestamptz: DateTime<Utc>,
 }
 
 #[derive(Debug)]
@@ -550,7 +551,7 @@ impl Db {
             let sec_code = String::from(sec_code);
             let short_ema = row.get("short_ema");
             let long_ema = row.get("long_ema");
-            let timestamptz: NaiveDateTime = row.get("update_timestamptz");
+            let timestamptz: DateTime<Utc> = row.get("update_timestamptz");
 
             let ema_frame = Ema {
                 sec_code,
