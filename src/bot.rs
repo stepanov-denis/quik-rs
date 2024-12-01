@@ -2,10 +2,10 @@
 use crate::app::AppCommand;
 use crate::ema;
 use crate::psql;
+use crate::psql::Db;
 use crate::quik::Terminal;
 use crate::signal::Signal;
 use chrono::{Datelike, Timelike, Utc, Weekday};
-use rust_decimal::prelude::ToPrimitive;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -75,6 +75,7 @@ fn is_trading_time() -> bool {
 
 pub async fn trade(
     mut command_receiver: mpsc::UnboundedReceiver<AppCommand>,
+    database: Arc<Db>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Preparing to work with QUIK
     let path = r"c:\QUIK Junior\trans2quik.dll";
@@ -96,9 +97,9 @@ pub async fn trade(
     }
 
     // Preparing for work with PostgreSQL
-    let connection_str = "host=localhost user=postgres dbname=postgres password=password";
-    let database = psql::Db::new(connection_str).await?;
-    database.init().await?;
+    // let connection_str = "host=localhost user=postgres dbname=postgres password=password";
+    // let database = psql::Db::new(connection_str).await?;
+    // database.init().await?;
     let class_code = "QJSIM";
     let instrument_status = "торгуется";
     let mut instruments = database
@@ -178,6 +179,16 @@ pub async fn trade(
                                 continue;
                             }
                         };
+
+                        let insert_ema_result = &database.insert_ema(&instrument.sec_code, short_ema, long_ema).await;
+
+                        match insert_ema_result {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("insert into ema error: {}", e);
+                                continue;
+                            }
+                        }
 
                         // Updating the golden cross/death cross signal
                         if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {

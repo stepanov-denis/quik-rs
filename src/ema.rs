@@ -50,12 +50,12 @@ impl Ema {
         let data_for_ema = database
             .get_candles(sec_code, timeframe, number_of_candles)
             .await?;
-        let ema_period= data_for_ema.len();
+        let ema_period = data_for_ema.len();
         info!(
             "ema_period: {}, number_of_candles: {}",
             ema_period, number_of_candles
         );
-        if ema_period as i32 != number_of_candles{
+        if ema_period as i32 != number_of_candles {
             return Err(EmaError::NoData);
         }
         let mut ema = ExponentialMovingAverage::new(ema_period).unwrap();

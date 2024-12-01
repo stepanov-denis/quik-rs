@@ -2,10 +2,18 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, Local, Utc, NaiveDateTime};
+use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use eframe::glow::Query;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
+
+pub struct Ema {
+    pub sec_code: String,
+    pub short_ema: f64,
+    pub long_ema: f64,
+    pub timestamptz: NaiveDateTime,
+}
 
 #[derive(Debug)]
 pub struct Candle {
@@ -57,7 +65,9 @@ impl Db {
 
     /// Set default transaction isolation level for database
     /// It's worked for the next session
-    pub async fn set_transaction_isolation(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn set_transaction_isolation(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
             error!("error get a connection from the pool: {:?}", e);
@@ -135,6 +145,31 @@ impl Db {
                 last_volume DECIMAL(15,6),
                 last_price_time TIME,
                 trade_date DATE,
+                update_timestamptz TIMESTAMPTZ DEFAULT NOW() -- timestamp with time zone
+            );
+        ";
+
+        // Executing the command to create a table
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
+
+    /// Creating a table of EMA
+    pub async fn create_ema(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        // Create table
+        let query = "
+            CREATE TABLE IF NOT EXISTS ema (
+                id SERIAL PRIMARY KEY,
+                sec_code VARCHAR(12),
+                short_ema DOUBLE PRECISION,
+                long_ema DOUBLE PRECISION,
                 update_timestamptz TIMESTAMPTZ DEFAULT NOW() -- timestamp with time zone
             );
         ";
@@ -233,7 +268,7 @@ impl Db {
         Ok(())
     }
 
-    // Инициализация базы данных
+    /// Initial database
     pub async fn init(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         if let Err(e) = self.set_transaction_isolation().await {
             error!("set default transaction isolation level error: {}", e);
@@ -244,6 +279,10 @@ impl Db {
 
         if let Err(e) = self.create_historical_trades().await {
             error!("create table historical_trades error: {}", e);
+        }
+
+        if let Err(e) = self.create_ema().await {
+            error!("create table ema error: {}", e);
         }
 
         if let Err(e) = self.insert_into_historical().await {
@@ -321,10 +360,7 @@ impl Db {
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
             let instr = Instruments {
-                // class_code,
-                // instrument_status,
                 sec_code,
-                // instr_short_name,
                 crossover_signal,
             };
 
@@ -345,7 +381,7 @@ impl Db {
             error!("error get a connection from the pool: {:?}", e);
             e
         })?;
-    
+
         let query = "
             WITH intervals AS (
                 SELECT
@@ -457,5 +493,75 @@ impl Db {
         }
 
         Ok(candles)
+    }
+
+    /// Insert EMA in ema table
+    pub async fn insert_ema(
+        &self,
+        sec_code: &str,
+        short_ema: f64,
+        long_ema: f64,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        let query = "
+            INSERT INTO ema (sec_code, short_ema, long_ema)
+            VALUES ($1, $2, $3);
+        ";
+
+        // Executing insert into ema
+        conn.execute(query, &[&sec_code, &short_ema, &long_ema])
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get EMA from ema table
+    pub async fn get_ema(
+        &self,
+        sec_code: &str,
+    ) -> Result<Vec<Ema>, RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        let query = "
+            SELECT short_ema, long_ema, update_timestamptz
+            FROM ema
+            WHERE sec_code = $1
+            ORDER BY update_timestamptz DESC LIMIT 1000;
+        ";
+
+        // Executing insert into ema
+        let rows = conn.query(query, &[&sec_code]).await.map_err(|e| {
+            error!("get ema error: {}", e);
+            e
+        })?;
+
+        let mut ema: Vec<Ema> = Vec::new();
+
+        for row in rows {
+            let sec_code = String::from(sec_code);
+            let short_ema = row.get("short_ema");
+            let long_ema = row.get("long_ema");
+            let timestamptz: NaiveDateTime = row.get("update_timestamptz");
+
+            let ema_frame = Ema {
+                sec_code,
+                short_ema,
+                long_ema,
+                timestamptz,
+            };
+
+            ema.push(ema_frame);
+        }
+
+        Ok(ema)
     }
 }
