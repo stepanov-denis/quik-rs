@@ -13,6 +13,7 @@ pub struct Ema {
     pub sec_code: String,
     pub short_ema: f64,
     pub long_ema: f64,
+    pub last_price: f64,
     pub timestamptz: DateTime<Utc>,
 }
 
@@ -171,6 +172,7 @@ impl Db {
                 sec_code VARCHAR(12),
                 short_ema DOUBLE PRECISION,
                 long_ema DOUBLE PRECISION,
+                last_price DOUBLE PRECISION,
                 update_timestamptz TIMESTAMPTZ DEFAULT NOW() -- timestamp with time zone
             );
         ";
@@ -502,6 +504,7 @@ impl Db {
         sec_code: &str,
         short_ema: f64,
         long_ema: f64,
+        last_price: f64,
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
@@ -510,12 +513,12 @@ impl Db {
         })?;
 
         let query = "
-            INSERT INTO ema (sec_code, short_ema, long_ema)
-            VALUES ($1, $2, $3);
+            INSERT INTO ema (sec_code, short_ema, long_ema, last_price)
+            VALUES ($1, $2, $3, $4);
         ";
 
         // Executing insert into ema
-        conn.execute(query, &[&sec_code, &short_ema, &long_ema])
+        conn.execute(query, &[&sec_code, &short_ema, &long_ema, &last_price])
             .await?;
 
         Ok(())
@@ -533,10 +536,10 @@ impl Db {
         })?;
 
         let query = "
-            SELECT short_ema, long_ema, update_timestamptz
+            SELECT short_ema, long_ema, last_price, update_timestamptz
             FROM ema
             WHERE sec_code = $1
-            ORDER BY update_timestamptz DESC LIMIT 1000;
+            ORDER BY update_timestamptz DESC LIMIT 100000;
         ";
 
         // Executing insert into ema
@@ -551,12 +554,14 @@ impl Db {
             let sec_code = String::from(sec_code);
             let short_ema = row.get("short_ema");
             let long_ema = row.get("long_ema");
+            let last_price = row.get("last_price");
             let timestamptz: DateTime<Utc> = row.get("update_timestamptz");
 
             let ema_frame = Ema {
                 sec_code,
                 short_ema,
                 long_ema,
+                last_price,
                 timestamptz,
             };
 

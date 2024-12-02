@@ -117,8 +117,16 @@ impl eframe::App for MyApp {
                         [datetime.timestamp_millis() as f64, e.long_ema]
                     })
                     .collect();
-                let short_line = Line::new(short_ema).color(Color32::BLUE).name("Short EMA");
-                let long_line = Line::new(long_ema).color(Color32::RED).name("Long EMA");
+                let last_price: PlotPoints = ema
+                    .iter()
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
+                let short_line = Line::new(short_ema).color(Color32::RED).name("Short EMA");
+                let long_line = Line::new(long_ema).color(Color32::GREEN).name("Long EMA");
+                let last_price_line = Line::new(last_price).color(Color32::BLUE).name("SEC_CODE");
 
                 Plot::new("EMA Plot")
                     .view_aspect(2.0)
@@ -127,14 +135,15 @@ impl eframe::App for MyApp {
                             .expect("Invalid timestamp");
                         datetime.format("%Y-%m-%d %H:%M:%S").to_string()
                     })
-                    .label_formatter(|_name, value| {
+                    .label_formatter(|name, value| {
                         let datetime = DateTime::from_timestamp_millis(value.x as i64)
                             .expect("Invalid timestamp");
-                        format!("{:.4}\n{}", value.y, datetime.format("%Y-%m-%d %H:%M:%S"))
+                        format!("{}: {:.4}\n{}", name, value.y, datetime.format("%Y-%m-%d %H:%M:%S"))
                     })
                     .show(ui, |plot_ui| {
                         plot_ui.line(short_line);
                         plot_ui.line(long_line);
+                        plot_ui.line(last_price_line);
                     });
             }
         });

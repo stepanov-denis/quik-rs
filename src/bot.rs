@@ -150,10 +150,10 @@ pub async fn trade(
                             short_number_of_candles,
                         ).await;
 
-                        let short_ema = match short_ema_result {
-                            Ok(ema) => {
-                                info!("short_ema: {}", ema);
-                                ema
+                        let (short_ema, last_price) = match short_ema_result {
+                            Ok((short_ema, last_price)) => {
+                                info!("short_ema: {}", short_ema);
+                                (short_ema, last_price)
                             }
                             Err(e) => {
                                 error!("{}", e);
@@ -169,10 +169,10 @@ pub async fn trade(
                             long_number_of_candles,
                         ).await;
 
-                        let long_ema = match long_ema_result {
-                            Ok(ema) => {
-                                info!("long_ema: {}", ema);
-                                ema
+                        let (long_ema, last_price) = match long_ema_result {
+                            Ok((long_ema, last_price)) => {
+                                info!("long_ema: {}", long_ema);
+                                (long_ema, last_price)
                             }
                             Err(e) => {
                                 error!("{}", e);
@@ -180,14 +180,8 @@ pub async fn trade(
                             }
                         };
 
-                        let insert_ema_result = &database.insert_ema(&instrument.sec_code, short_ema, long_ema).await;
-
-                        match insert_ema_result {
-                            Ok(_) => {}
-                            Err(e) => {
-                                error!("insert into ema error: {}", e);
-                                continue;
-                            }
+                        if let Err(e) = &database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price).await {
+                            error!("insert into ema error: {}", e);
                         }
 
                         // Updating the golden cross/death cross signal

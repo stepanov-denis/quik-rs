@@ -41,7 +41,7 @@ impl Ema {
         sec_code: &str,
         timeframe: i32,
         number_of_candles: i32,
-    ) -> Result<f64, EmaError> {
+    ) -> Result<(f64, f64), EmaError> {
         info!("start calculate EMA");
         info!(
             "instrument_code: {}, timeframe: {} minutes, number_of_candles: {}",
@@ -61,6 +61,7 @@ impl Ema {
         let mut ema = ExponentialMovingAverage::new(ema_period).unwrap();
         info!("ema new with period = {}", ema);
         let mut ema_value = 0.0;
+        let mut last_price: f64 = 0.0;
         for data in data_for_ema {
             let item = DataItem::builder()
                 .open(data.open)
@@ -72,8 +73,9 @@ impl Ema {
                 .unwrap();
 
             ema_value = ema.next(&item);
+            last_price = data.close;
         }
 
-        Ok(ema_value)
+        Ok((ema_value, last_price))
     }
 }
