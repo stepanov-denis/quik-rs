@@ -7,6 +7,7 @@ use eframe::egui;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::RwLock;
 use tracing::error;
 mod app;
 mod bot;
@@ -24,18 +25,26 @@ async fn main() -> eframe::Result<(), Box<dyn Error>> {
     let connection_str = "host=localhost user=postgres dbname=postgres password=password";
     let database = Arc::new(psql::Db::new(connection_str).await?);
     database.init().await?;
-    let database_clone = Arc::clone(&database);
 
-    // Spawn your asynchronous task using tokio::spawn
-    // let loop_shutdown_signal = Arc::clone(&shutdown_signal);
+    let class_code = "QJSIM";
+    let instrument_status = "торгуется";
+    let instruments = Arc::new(RwLock::new(
+        database
+            .get_instruments(class_code, instrument_status)
+            .await?,
+    ));
+
+    let database_clone = Arc::clone(&database);
+    let instruments_clone = Arc::clone(&instruments);
+
     tokio::spawn(async move {
-        if let Err(e) = bot::trade(command_receiver, database_clone).await {
+        if let Err(e) = bot::trade(command_receiver, database_clone, instruments_clone).await {
             error!("something went wrong, bot error: {}", e);
         }
     });
 
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
         ..Default::default()
     };
 
@@ -46,6 +55,7 @@ async fn main() -> eframe::Result<(), Box<dyn Error>> {
             Ok(Box::new(app::MyApp::new(
                 command_sender.clone(),
                 Arc::clone(&database),
+                Arc::clone(&instruments),
             )))
         }),
     )?;

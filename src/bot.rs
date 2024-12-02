@@ -1,16 +1,19 @@
 //! # bot work for algo trading
 use crate::app::AppCommand;
 use crate::ema;
-use crate::psql;
 use crate::psql::Db;
+use crate::psql::Ema;
+use crate::psql::Instrument;
 use crate::quik::Terminal;
 use crate::signal::Signal;
 use chrono::{Datelike, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
+use ta::DataItem;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard as TokioMutexGuard;
+use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 
@@ -76,6 +79,7 @@ fn is_trading_time() -> bool {
 pub async fn trade(
     mut command_receiver: mpsc::UnboundedReceiver<AppCommand>,
     database: Arc<Db>,
+    instruments: Arc<RwLock<Vec<Instrument>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Preparing to work with QUIK
     let path = r"c:\QUIK Junior\trans2quik.dll";
@@ -96,15 +100,11 @@ pub async fn trade(
         terminal_guard.start_trades();
     }
 
-    // Preparing for work with PostgreSQL
-    // let connection_str = "host=localhost user=postgres dbname=postgres password=password";
-    // let database = psql::Db::new(connection_str).await?;
-    // database.init().await?;
-    let class_code = "QJSIM";
-    let instrument_status = "торгуется";
-    let mut instruments = database
-        .get_instruments(class_code, instrument_status)
-        .await?;
+    // let class_code = "QJSIM";
+    // let instrument_status = "торгуется";
+    // let mut instruments = database
+    //     .get_instruments(class_code, instrument_status)
+    //     .await?;
 
     // Preparing for trading
     let timeframe: i32 = 60; // minutes
@@ -137,7 +137,8 @@ pub async fn trade(
             },
             result = async {
                 if is_trading_time() {
-                    for instrument in &mut instruments {
+                    let mut instruments = instruments.write().await;
+                    for instrument in instruments.iter_mut() {
                         if instrument.sec_code == "SBER" {
                                                     // Get access to the terminal
                         let terminal_guard = terminal.lock().await;
@@ -150,7 +151,7 @@ pub async fn trade(
                             short_number_of_candles,
                         ).await;
 
-                        let (short_ema, last_price) = match short_ema_result {
+                        let (short_ema, _last_price) = match short_ema_result {
                             Ok((short_ema, last_price)) => {
                                 info!("short_ema: {}", short_ema);
                                 (short_ema, last_price)

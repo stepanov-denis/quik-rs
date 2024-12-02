@@ -2,8 +2,7 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
-use eframe::glow::Query;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
@@ -31,7 +30,7 @@ pub struct Db {
 }
 
 /// Trading instruments
-pub struct Instruments {
+pub struct Instrument {
     // class_code: String,
     // instrument_status: String,
     pub sec_code: String,
@@ -303,7 +302,7 @@ impl Db {
         &self,
         class_code: &str,
         instrument_status: &str,
-    ) -> Result<Vec<Instruments>, RunError<bb8_postgres::tokio_postgres::Error>> {
+    ) -> Result<Vec<Instrument>, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
             error!("error get a connection from the pool: {:?}", e);
@@ -343,7 +342,7 @@ impl Db {
         );
 
         // Creating a vector for Instruments
-        let mut instruments: Vec<Instruments> = Vec::new();
+        let mut instruments: Vec<Instrument> = Vec::new();
 
         // Processing the results SQL request
         for row in rows {
@@ -351,7 +350,7 @@ impl Db {
             let instrument_status: String = row.get("instrument_status");
             let sec_code: String = row.get("sec_code");
             let instr_short_name: String = row.get("instr_short_name");
-            let update_timestamptz: DateTime<Local> = row.get("update_timestamptz");
+            let update_timestamptz: DateTime<Utc> = row.get("update_timestamptz");
 
             println!(
                 "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
@@ -362,12 +361,12 @@ impl Db {
             let hysteresis_periods = 5; // periods
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
-            let instr = Instruments {
+            let instrument = Instrument {
                 sec_code,
                 crossover_signal,
             };
 
-            instruments.push(instr);
+            instruments.push(instrument);
         }
         Ok(instruments)
     }
@@ -536,7 +535,7 @@ impl Db {
         })?;
 
         let query = "
-            SELECT short_ema, long_ema, last_price, update_timestamptz
+            SELECT sec_code, short_ema, long_ema, last_price, update_timestamptz
             FROM ema
             WHERE sec_code = $1
             ORDER BY update_timestamptz DESC LIMIT 100000;
@@ -551,7 +550,7 @@ impl Db {
         let mut ema: Vec<Ema> = Vec::new();
 
         for row in rows {
-            let sec_code = String::from(sec_code);
+            let sec_code = row.get("sec_code");
             let short_ema = row.get("short_ema");
             let long_ema = row.get("long_ema");
             let last_price = row.get("last_price");
