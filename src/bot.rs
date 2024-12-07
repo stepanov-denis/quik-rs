@@ -100,16 +100,10 @@ pub async fn trade(
         terminal_guard.start_trades();
     }
 
-    // let class_code = "QJSIM";
-    // let instrument_status = "торгуется";
-    // let mut instruments = database
-    //     .get_instruments(class_code, instrument_status)
-    //     .await?;
-
     // Preparing for trading
-    let timeframe: i32 = 60; // minutes
-    let short_number_of_candles: i32 = 8;
-    let long_number_of_candles: i32 = 21;
+    let timeframe: i32 = 5;
+    let short_number_of_candles: i32 = 50;
+    let long_number_of_candles: i32 = 200;
 
     loop {
         tokio::select! {
@@ -140,78 +134,89 @@ pub async fn trade(
                     let mut instruments = instruments.write().await;
                     for instrument in instruments.iter_mut() {
                         if instrument.sec_code == "SBER" {
-                                                    // Get access to the terminal
-                        let terminal_guard = terminal.lock().await;
+                            // Get access to the terminal
+                            let terminal_guard = terminal.lock().await;
 
-                        // Calculate the short EMA
-                        let short_ema_result = ema::Ema::calc(
-                            &database,
-                            &instrument.sec_code,
-                            timeframe,
-                            short_number_of_candles,
-                        ).await;
+                            // Calculate the short EMA
+                            let short_ema_result = ema::Ema::calc(
+                                &database,
+                                &instrument.sec_code,
+                                timeframe,
+                                short_number_of_candles,
+                            ).await;
 
-                        let (short_ema, _last_price) = match short_ema_result {
-                            Ok((short_ema, last_price)) => {
-                                info!("short_ema: {}", short_ema);
-                                (short_ema, last_price)
+                            let short_ema = match short_ema_result {
+                                Ok(short_ema) => {
+                                    info!("short_ema: {}", short_ema);
+                                    short_ema
+                                }
+                                Err(e) => {
+                                    error!("{}", e);
+                                    continue;
+                                }
+                            };
+
+                            // Calculate the long EMA
+                            let long_ema_result = ema::Ema::calc(
+                                &database,
+                                &instrument.sec_code,
+                                timeframe,
+                                long_number_of_candles,
+                            ).await;
+
+                            let long_ema = match long_ema_result {
+                                Ok(long_ema) => {
+                                    info!("long_ema: {}", long_ema);
+                                    long_ema
+                                }
+                                Err(e) => {
+                                    error!("{}", e);
+                                    continue;
+                                }
+                            };
+
+                            let last_price = match  database.get_last_price(&instrument.sec_code).await {
+                                Ok(last_price) => {
+                                    info!("last_price: {}", last_price);
+                                    last_price
+                                }
+                                Err(e) => {
+                                    error!("{}", e);
+                                    continue;
+                                }
+                            };
+
+                            if let Err(e) = &database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price).await {
+                                error!("insert into ema error: {}", e);
                             }
-                            Err(e) => {
-                                error!("{}", e);
-                                continue;
-                            }
-                        };
 
-                        // Calculate the long EMA
-                        let long_ema_result = ema::Ema::calc(
-                            &database,
-                            &instrument.sec_code,
-                            timeframe,
-                            long_number_of_candles,
-                        ).await;
-
-                        let (long_ema, last_price) = match long_ema_result {
-                            Ok((long_ema, last_price)) => {
-                                info!("long_ema: {}", long_ema);
-                                (long_ema, last_price)
-                            }
-                            Err(e) => {
-                                error!("{}", e);
-                                continue;
-                            }
-                        };
-
-                        if let Err(e) = &database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price).await {
-                            error!("insert into ema error: {}", e);
-                        }
-
-                        // Updating the golden cross/death cross signal
-                        if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
-                            match signal {
-                                Signal::Buy => {
-                                    info!("{} => {:?}", instrument.sec_code, signal);
-                                    let operation = "B";
-                                    let transaction_str = transaction_str(&instrument.sec_code, operation);
-                                    match transaction_str {
-                                        Ok(str) => {
-                                            process_transaction(terminal_guard, &str);
+                            // Updating the golden cross/death cross signal
+                            if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
+                                match signal {
+                                    Signal::Buy => {
+                                        info!("{} => {:?}", instrument.sec_code, signal);
+                                        let operation = "B";
+                                        let transaction_str = transaction_str(&instrument.sec_code, operation);
+                                        match transaction_str {
+                                            Ok(str) => {
+                                                process_transaction(terminal_guard, &str);
+                                            }
+                                            Err(e) => error!("create transaction_str error: {}", e)
                                         }
-                                        Err(e) => error!("create transaction_str error: {}", e)
+                                    }
+                                    Signal::Sell => {
+                                        info!("{} => {:?}", instrument.sec_code, signal);
+                                        let operation = "S";
+                                        let transaction_str = transaction_str(&instrument.sec_code, operation);
+                                        match transaction_str {
+                                            Ok(str) => {
+                                                process_transaction(terminal_guard, &str);
+                                            }
+                                            Err(e) => error!("create transaction_str error: {}", e)
+                                        }
                                     }
                                 }
-                                Signal::Sell => {
-                                    info!("{} => {:?}", instrument.sec_code, signal);
-                                    let operation = "S";
-                                    let transaction_str = transaction_str(&instrument.sec_code, operation);
-                                    match transaction_str {
-                                        Ok(str) => {
-                                            process_transaction(terminal_guard, &str);
-                                        }
-                                        Err(e) => error!("create transaction_str error: {}", e)
-                                    }
-                                }
                             }
-                        }
                         }
 
                     }
@@ -220,8 +225,8 @@ pub async fn trade(
                 }
 
                 // Pause before the next iteration
-                info!("sleep 60 seconds");
-                sleep(Duration::from_secs(60)).await;
+                info!("sleep 5 seconds");
+                sleep(Duration::from_secs(5)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {

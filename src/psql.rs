@@ -385,36 +385,82 @@ impl Db {
         })?;
 
         let query = "
-            WITH intervals AS (
-                SELECT
-                    generate_series(
-                        date_trunc('minute', now() AT TIME ZONE 'UTC') - ((($2::integer + 2) * $1::integer) || ' minutes')::interval,
-                        date_trunc('minute', now() AT TIME ZONE 'UTC'),
-                        ($1::integer || ' minutes')::interval
-                    ) AS interval_start
-            ),
-            candle_data AS (
-                SELECT
-                    interval_start,
-                    (SELECT last_price FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00') ORDER BY trade_date + last_price_time ASC LIMIT 1) AS open,
-                    (SELECT MAX(last_price) FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00')) AS high,
-                    (SELECT MIN(last_price) FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00')) AS low,
-                    (SELECT last_price FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00') ORDER BY trade_date + last_price_time DESC LIMIT 1) AS close,
-                    (SELECT SUM(last_volume) FROM historical_trades WHERE trade_date + last_price_time AT TIME ZONE 'UTC' >= interval_start AND trade_date + last_price_time AT TIME ZONE 'UTC' < interval_start + ($1::integer || ' minutes')::interval AND sec_code = $3 AND (last_price_time AT TIME ZONE 'UTC' BETWEEN '01:05:00' AND '23:00:00')) AS volume
-                FROM intervals
-                WHERE
-                    interval_start::time BETWEEN '01:05:00' AND '23:00:00'
-            ),
-            final_candles AS (
-                SELECT interval_start, open, high, low, close, volume
-                FROM candle_data
-                -- WHERE open IS NOT NULL
-                ORDER BY interval_start DESC
-                LIMIT $2::integer
+        WITH
+        params AS (
+          SELECT
+            $1::INT AS timeframe_min,   -- Timeframe in minutes
+            $2::INT AS num_candles,     -- Number of candles to retrieve
+            $3::TEXT AS sec_code        -- Security code
+        ),
+        -- Determine the current time in UTC+3
+        current_ts AS (
+          SELECT (NOW() AT TIME ZONE 'UTC') + INTERVAL '3 hours' AS ts
+        ),
+        -- Compute the timestamp of the last fully completed candle before current time
+        last_candle_start_ts AS (
+          SELECT
+            timestamp 'epoch' + FLOOR(
+              (EXTRACT(EPOCH FROM ts) - (60 * (SELECT timeframe_min FROM params))) / (60 * (SELECT timeframe_min FROM params))
+            ) * (60 * (SELECT timeframe_min FROM params)) * INTERVAL '1 second' AS ts
+          FROM
+            current_ts
+        ),
+        candle_times AS (
+          SELECT
+            ct.candle_start,
+            ct.candle_start + (SELECT timeframe_min FROM params) * INTERVAL '1 minute' AS candle_end
+          FROM
+            (
+              SELECT
+                generate_series(
+                  -- Start from an earlier candle to account for excluded candles
+                  (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 24 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
+                  -- End at the last fully completed candle
+                  (SELECT ts FROM last_candle_start_ts),
+                  -- Increment by the timeframe
+                  (SELECT timeframe_min FROM params) * INTERVAL '1 minute'
+                ) AS candle_start
+            ) ct
+          WHERE
+            -- Exclude candles during non-trading hours (updated schedule)
+            NOT (
+              ct.candle_start::time >= TIME '02:00:00' AND ct.candle_start::time < TIME '04:00:00'
             )
-            SELECT *
-            FROM final_candles
-            ORDER BY interval_start;
+        ),
+        candles AS (
+          SELECT
+            ct.candle_start,
+            ct.candle_end,
+            (ARRAY_AGG(ht.last_price ORDER BY ht.trade_date + ht.last_price_time))[1] AS o,
+            MAX(ht.last_price) AS h,
+            MIN(ht.last_price) AS l,
+            (ARRAY_AGG(ht.last_price ORDER BY ht.trade_date + ht.last_price_time DESC))[1] AS c,
+            SUM(ht.last_volume) AS v
+          FROM
+            candle_times ct
+            LEFT JOIN historical_trades ht ON ht.sec_code = (SELECT sec_code FROM params)
+            AND (ht.trade_date + ht.last_price_time) >= ct.candle_start
+            AND (ht.trade_date + ht.last_price_time) < ct.candle_end
+          GROUP BY
+            ct.candle_start,
+            ct.candle_end
+          ORDER BY
+            ct.candle_start DESC
+        )
+      SELECT
+        candle_start,
+        candle_end,
+        COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC)) AS open,
+        COALESCE(h, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS high,
+        COALESCE(l, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS low,
+        COALESCE(c, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS close,
+        COALESCE(v, 0) AS volume
+      FROM
+        candles
+      ORDER BY
+        candle_start DESC
+      LIMIT
+        (SELECT num_candles FROM params);                           
         ";
 
         // Executing a request with parameters
@@ -431,14 +477,14 @@ impl Db {
 
         // Print column names
         println!(
-            "{:<30} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15}",
-            "interval_start", "open", "high", "low", "close", "volume"
+            "{:>19} | {:>19} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15}",
+            "candle_start", "candle_end", "open", "high", "low", "close", "volume"
         );
 
         // Print the dividing line
         println!(
-            "{:-<30}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-",
-            "", "", "", "", "", ""
+            "{:-<19}-+-{:-<19}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-+-{:-<15}-",
+            "", "", "", "", "", "", ""
         );
 
         // Create a vector for DataItem
@@ -446,7 +492,9 @@ impl Db {
 
         // Processing the results SQL request
         for row in rows {
-            let interval_start: NaiveDateTime = row.get("interval_start");
+            let candle_start: NaiveDateTime = row.get("candle_start");
+
+            let candle_end: NaiveDateTime = row.get("candle_end");
 
             let open: f64 = row
                 .try_get::<_, Decimal>("open")
@@ -479,8 +527,8 @@ impl Db {
                 .unwrap_or_default();
 
             println!(
-                "{:<30} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6}",
-                interval_start, open, high, low, close, volume
+                "{:>19} | {:>19} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6} | {:>15.6}",
+                candle_start, candle_end, open, high, low, close, volume
             );
 
             let candle = Candle {
@@ -497,13 +545,41 @@ impl Db {
         Ok(candles)
     }
 
+    /// Get last_price from historical_trades table
+    pub async fn get_last_price(&self, sec_code: &str) -> Result<f64, RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        let query = "
+            SELECT last_price
+            FROM current_trades
+            WHERE sec_code = $1
+            ORDER BY trade_date DESC, last_price_time DESC
+            LIMIT 1;
+        ";
+
+        // Executing
+        let row = conn.query_one(query, &[&sec_code]).await.map_err(|e| {
+            error!("get last_price error: {}", e);
+            e
+        })?;
+
+        let last_price = row.get("last_price");
+
+        Ok(last_price)
+
+    }
+
     /// Insert EMA in ema table
     pub async fn insert_ema(
         &self,
         sec_code: &str,
-        short_ema: f64,
-        long_ema: f64,
-        last_price: f64,
+        short_ema: &f64,
+        long_ema: &f64,
+        last_price: &f64,
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
@@ -517,7 +593,7 @@ impl Db {
         ";
 
         // Executing insert into ema
-        conn.execute(query, &[&sec_code, &short_ema, &long_ema, &last_price])
+        conn.execute(query, &[&sec_code, short_ema, long_ema, last_price])
             .await?;
 
         Ok(())
@@ -541,7 +617,7 @@ impl Db {
             ORDER BY update_timestamptz DESC LIMIT 100000;
         ";
 
-        // Executing insert into ema
+        // Executing
         let rows = conn.query(query, &[&sec_code]).await.map_err(|e| {
             error!("get ema error: {}", e);
             e
