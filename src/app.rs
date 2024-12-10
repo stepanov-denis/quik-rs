@@ -4,12 +4,13 @@
 use crate::psql::Db;
 use crate::psql::Ema;
 use crate::psql::Instrument;
+use crate::psql::Operation;
 use bb8::RunError;
 use chrono::{DateTime, Utc};
 use eframe::egui;
 use egui::Color32;
 use egui_plot::GridMark;
-use egui_plot::{Line, Plot, PlotPoints};
+use egui_plot::{Line, Plot, PlotPoints, Points, MarkerShape};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
@@ -152,7 +153,13 @@ impl eframe::App for MyApp {
 
             // Render the EMA plot if data is available
             if let Some(Ok(ema)) = &*self.ema_data.lock().unwrap() {
-                let short_ema: PlotPoints = ema
+                let sec_code = if let Some(first_ema) = ema.first() {
+                    &first_ema.sec_code
+                } else {
+                    "Unknown"
+                };
+
+                let short_ema_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
                         let datetime: DateTime<Utc> = e.timestamptz;
@@ -160,7 +167,7 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                let long_ema: PlotPoints = ema
+                let long_ema_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
                         let datetime: DateTime<Utc> = e.timestamptz;
@@ -168,7 +175,7 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                let last_price: PlotPoints = ema
+                let last_price_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
                         let datetime: DateTime<Utc> = e.timestamptz;
@@ -176,28 +183,90 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                let sec_code = if let Some(first_ema) = ema.first() {
-                    &first_ema.sec_code
-                } else {
-                    "Unknown"
-                };
+                let short_line = Line::new(short_ema_points).color(Color32::RED).name("Short EMA");
+                let long_line = Line::new(long_ema_points).color(Color32::GREEN).name("Long EMA");
+                let last_price_line = Line::new(last_price_points).color(Color32::BLUE).name(sec_code);
 
-                let short_line = Line::new(short_ema).color(Color32::RED).name("Short EMA");
-                let long_line = Line::new(long_ema).color(Color32::GREEN).name("Long EMA");
-                let last_price_line = Line::new(last_price).color(Color32::BLUE).name(sec_code);
+                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
+                let signal_buy_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::SignalBuy)
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
+
+                let signal_sell_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::SignalSell)
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
+
+                // Создаем объекты Points для операций
+                let signal_buy_markers = Points::new(signal_buy_points)
+                    .name("Signal Buy")
+                    .color(Color32::GREEN)
+                    .shape(MarkerShape::Up) // Выбираем форму маркера
+                    .filled(true)
+                    .radius(5.0);
+
+                let signal_sell_markers = Points::new(signal_sell_points)
+                    .name("Signal Sell")
+                    .color(Color32::RED)
+                    .shape(MarkerShape::Down)
+                    .filled(true)
+                    .radius(5.0);
+
+                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
+                let trade_buy_points: PlotPoints = ema
+                .iter()
+                .filter(|e| e.operation == Operation::TradeBuy)
+                .map(|e| {
+                    let datetime: DateTime<Utc> = e.timestamptz;
+                    [datetime.timestamp_millis() as f64, e.last_price]
+                })
+                .collect();
+
+                let trade_sell_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::TradeSell)
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
+
+                // Создаем объекты Points для операций
+                let trade_buy_markers = Points::new(trade_buy_points)
+                    .name("Trade Buy")
+                    .color(Color32::GREEN)
+                    .shape(MarkerShape::Up) // Выбираем форму маркера
+                    .filled(true)
+                    .radius(5.0);
+
+                let trade_sell_markers = Points::new(trade_sell_points)
+                    .name("Trade Sell")
+                    .color(Color32::RED)
+                    .shape(MarkerShape::Down)
+                    .filled(true)
+                    .radius(5.0);
 
                 Plot::new("EMA Plot")
                     .view_aspect(2.0)
                     .x_axis_formatter(|mark: GridMark, _range: &std::ops::RangeInclusive<f64>| {
                         let datetime = DateTime::from_timestamp_millis(mark.value as i64)
-                            .expect("Invalid timestamp");
+                            .expect("Invalid timestamp");                      
                         datetime.format("%Y-%m-%d %H:%M:%S").to_string()
                     })
                     .label_formatter(|name, value| {
                         let datetime = DateTime::from_timestamp_millis(value.x as i64)
                             .expect("Invalid timestamp");
                         format!(
-                            "{}: {:.4}\n{}",
+                            "{}\n{:.4}\n{}",
                             name,
                             value.y,
                             datetime.format("%Y-%m-%d %H:%M:%S")
@@ -207,6 +276,10 @@ impl eframe::App for MyApp {
                         plot_ui.line(short_line);
                         plot_ui.line(long_line);
                         plot_ui.line(last_price_line);
+                        plot_ui.points(signal_buy_markers);
+                        plot_ui.points(signal_sell_markers);
+                        plot_ui.points(trade_buy_markers);
+                        plot_ui.points(trade_sell_markers);
                     });
             }
         });

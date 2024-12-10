@@ -43,6 +43,7 @@ use std::fmt;
 use std::str;
 use std::string::FromUtf8Error;
 use std::sync::{Arc, Condvar, Mutex};
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, info};
 
 lazy_static! {
@@ -52,6 +53,10 @@ lazy_static! {
         Arc::new((Mutex::new(false), Condvar::new()));
     static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
         Arc::new((Mutex::new(false), Condvar::new()));
+}
+
+lazy_static! {
+    pub static ref TRADE_SENDER: Mutex<Option<UnboundedSender<TradeInfo>>> = Mutex::new(None);
 }
 
 /// Prototype of a callback function for monitoring the connection status.
@@ -266,6 +271,19 @@ impl From<NulError> for Trans2QuikError {
     fn from(err: NulError) -> Trans2QuikError {
         Trans2QuikError::NulError(err)
     }
+}
+
+#[derive(Debug)]
+pub struct TradeInfo {
+    pub mode: Mode,
+    pub trade_num: u64,
+    pub order_num: u64,
+    pub class_code: String,
+    pub sec_code: String,
+    pub price: f64,
+    pub quantity: i64,
+    pub is_sell: IsSell,
+    pub value: f64,
 }
 
 /// The `Terminal` structure is used to interact with the QUIK trading terminal through the library Trans2QUIK.dll.
@@ -1129,10 +1147,25 @@ unsafe extern "C" fn trade_status_callback(
 
     info!("TRANS2QUIK_TRADE_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);
 
-    let (lock, cvar) = TRADE_CALLBACK_RECEIVED.as_ref();
-    let mut received = lock.lock().unwrap();
-    *received = true;
-    cvar.notify_one();
+    if let Some(sender) = TRADE_SENDER.lock().unwrap().as_ref() {
+        let trade_info = TradeInfo {
+            mode,
+            trade_num,
+            order_num,
+            class_code,
+            sec_code,
+            price,
+            quantity,
+            is_sell,
+            value,
+        };
+
+        if let Err(err) = sender.send(trade_info) {
+            error!("trade_status_callback send error: {:?}", err);
+        }
+    } else {
+        error!("TRADE_SENDER is not initialized");
+    }
 }
 
 #[cfg(test)]

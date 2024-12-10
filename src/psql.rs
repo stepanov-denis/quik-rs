@@ -2,10 +2,30 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
+use postgres_types::{ToSql,FromSql};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
+
+#[derive(Debug, ToSql, FromSql, PartialEq)]
+#[postgres(name = "operation")]
+pub enum Operation {
+    #[postgres(name = "signal_buy")]
+    SignalBuy,
+    #[postgres(name = "signal_sell")]
+    SignalSell,
+    #[postgres(name = "order_buy")]
+    OrderBuy,
+    #[postgres(name = "order_sell")]
+    OrderSell,
+    #[postgres(name = "trade_buy")]
+    TradeBuy,
+    #[postgres(name = "trade_sell")]
+    TradeSell,
+    #[postgres(name = "none")]
+    None,
+}
 
 #[derive(Debug)]
 pub struct Ema {
@@ -13,6 +33,7 @@ pub struct Ema {
     pub short_ema: f64,
     pub long_ema: f64,
     pub last_price: f64,
+    pub operation: Operation,
     pub timestamptz: DateTime<Utc>,
 }
 
@@ -23,6 +44,17 @@ pub struct Candle {
     pub low: f64,
     pub close: f64,
     pub volume: f64,
+}
+
+impl Candle {
+    pub fn is_valid(&self) -> bool {
+        // Define a small epsilon
+        const EPSILON: f64 = 1e-10;
+
+        let fields = [self.open, self.high, self.low, self.close, self.volume];
+
+        fields.iter().all(|&value| value.is_finite() && value > EPSILON)
+    }
 }
 
 pub struct Db {
@@ -146,7 +178,7 @@ impl Db {
                 last_volume DECIMAL(15,6),
                 last_price_time TIME,
                 trade_date DATE,
-                update_timestamptz TIMESTAMPTZ DEFAULT NOW() -- timestamp with time zone
+                update_timestamptz TIMESTAMPTZ DEFAULT NOW()
             );
         ";
 
@@ -166,13 +198,30 @@ impl Db {
 
         // Create table
         let query = "
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'operation') THEN
+                    CREATE TYPE operation AS ENUM (
+                        'signal_buy',
+                        'signal_sell',
+                        'order_buy',
+                        'order_sell',
+                        'trade_buy',
+                        'trade_sell',
+                        'none'
+                    );
+                END IF;
+            END;
+            $$;
+
             CREATE TABLE IF NOT EXISTS ema (
                 id SERIAL PRIMARY KEY,
                 sec_code VARCHAR(12),
                 short_ema DOUBLE PRECISION,
                 long_ema DOUBLE PRECISION,
                 last_price DOUBLE PRECISION,
-                update_timestamptz TIMESTAMPTZ DEFAULT NOW() -- timestamp with time zone
+                operation OPERATION,
+                update_timestamptz TIMESTAMPTZ DEFAULT NOW()
             );
         ";
 
@@ -385,82 +434,82 @@ impl Db {
         })?;
 
         let query = "
-        WITH
-        params AS (
-          SELECT
-            $1::INT AS timeframe_min,   -- Timeframe in minutes
-            $2::INT AS num_candles,     -- Number of candles to retrieve
-            $3::TEXT AS sec_code        -- Security code
-        ),
-        -- Determine the current time in UTC+3
-        current_ts AS (
-          SELECT (NOW() AT TIME ZONE 'UTC') + INTERVAL '3 hours' AS ts
-        ),
-        -- Compute the timestamp of the last fully completed candle before current time
-        last_candle_start_ts AS (
-          SELECT
-            timestamp 'epoch' + FLOOR(
-              (EXTRACT(EPOCH FROM ts) - (60 * (SELECT timeframe_min FROM params))) / (60 * (SELECT timeframe_min FROM params))
-            ) * (60 * (SELECT timeframe_min FROM params)) * INTERVAL '1 second' AS ts
-          FROM
-            current_ts
-        ),
-        candle_times AS (
-          SELECT
-            ct.candle_start,
-            ct.candle_start + (SELECT timeframe_min FROM params) * INTERVAL '1 minute' AS candle_end
-          FROM
-            (
-              SELECT
-                generate_series(
-                  -- Start from an earlier candle to account for excluded candles
-                  (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 24 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
-                  -- End at the last fully completed candle
-                  (SELECT ts FROM last_candle_start_ts),
-                  -- Increment by the timeframe
-                  (SELECT timeframe_min FROM params) * INTERVAL '1 minute'
-                ) AS candle_start
-            ) ct
-          WHERE
-            -- Exclude candles during non-trading hours (updated schedule)
-            NOT (
-              ct.candle_start::time >= TIME '02:00:00' AND ct.candle_start::time < TIME '04:00:00'
+            WITH
+            params AS (
+            SELECT
+                $1::INT AS timeframe_min,   -- Timeframe in minutes
+                $2::INT AS num_candles,     -- Number of candles to retrieve
+                $3::TEXT AS sec_code        -- Security code
+            ),
+            -- Determine the current time in UTC+3
+            current_ts AS (
+            SELECT (NOW() AT TIME ZONE 'UTC') + INTERVAL '3 hours' AS ts
+            ),
+            -- Compute the timestamp of the last fully completed candle before current time
+            last_candle_start_ts AS (
+            SELECT
+                timestamp 'epoch' + FLOOR(
+                (EXTRACT(EPOCH FROM ts) - (60 * (SELECT timeframe_min FROM params))) / (60 * (SELECT timeframe_min FROM params))
+                ) * (60 * (SELECT timeframe_min FROM params)) * INTERVAL '1 second' AS ts
+            FROM
+                current_ts
+            ),
+            candle_times AS (
+            SELECT
+                ct.candle_start,
+                ct.candle_start + (SELECT timeframe_min FROM params) * INTERVAL '1 minute' AS candle_end
+            FROM
+                (
+                SELECT
+                    generate_series(
+                    -- Start from an earlier candle to account for excluded candles
+                    (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 24 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
+                    -- End at the last fully completed candle
+                    (SELECT ts FROM last_candle_start_ts),
+                    -- Increment by the timeframe
+                    (SELECT timeframe_min FROM params) * INTERVAL '1 minute'
+                    ) AS candle_start
+                ) ct
+            WHERE
+                -- Exclude candles during non-trading hours (updated schedule)
+                NOT (
+                ct.candle_start::time >= TIME '02:00:00' AND ct.candle_start::time < TIME '04:00:00'
+                )
+            ),
+            candles AS (
+            SELECT
+                ct.candle_start,
+                ct.candle_end,
+                (ARRAY_AGG(ht.last_price ORDER BY ht.trade_date + ht.last_price_time))[1] AS o,
+                MAX(ht.last_price) AS h,
+                MIN(ht.last_price) AS l,
+                (ARRAY_AGG(ht.last_price ORDER BY ht.trade_date + ht.last_price_time DESC))[1] AS c,
+                SUM(ht.last_volume) AS v
+            FROM
+                candle_times ct
+                LEFT JOIN historical_trades ht ON ht.sec_code = (SELECT sec_code FROM params)
+                AND (ht.trade_date + ht.last_price_time) >= ct.candle_start
+                AND (ht.trade_date + ht.last_price_time) < ct.candle_end
+            GROUP BY
+                ct.candle_start,
+                ct.candle_end
+            ORDER BY
+                ct.candle_start DESC
             )
-        ),
-        candles AS (
-          SELECT
-            ct.candle_start,
-            ct.candle_end,
-            (ARRAY_AGG(ht.last_price ORDER BY ht.trade_date + ht.last_price_time))[1] AS o,
-            MAX(ht.last_price) AS h,
-            MIN(ht.last_price) AS l,
-            (ARRAY_AGG(ht.last_price ORDER BY ht.trade_date + ht.last_price_time DESC))[1] AS c,
-            SUM(ht.last_volume) AS v
-          FROM
-            candle_times ct
-            LEFT JOIN historical_trades ht ON ht.sec_code = (SELECT sec_code FROM params)
-            AND (ht.trade_date + ht.last_price_time) >= ct.candle_start
-            AND (ht.trade_date + ht.last_price_time) < ct.candle_end
-          GROUP BY
-            ct.candle_start,
-            ct.candle_end
-          ORDER BY
-            ct.candle_start DESC
-        )
-      SELECT
-        candle_start,
-        candle_end,
-        COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC)) AS open,
-        COALESCE(h, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS high,
-        COALESCE(l, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS low,
-        COALESCE(c, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS close,
-        COALESCE(v, 0) AS volume
-      FROM
-        candles
-      ORDER BY
-        candle_start DESC
-      LIMIT
-        (SELECT num_candles FROM params);                           
+        SELECT
+            candle_start,
+            candle_end,
+            COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC)) AS open,
+            COALESCE(h, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS high,
+            COALESCE(l, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS low,
+            COALESCE(c, COALESCE(o, LAG(c) OVER (ORDER BY candle_start DESC))) AS close,
+            COALESCE(v, 0) AS volume
+        FROM
+            candles
+        ORDER BY
+            candle_start DESC
+        LIMIT
+            (SELECT num_candles FROM params);                           
         ";
 
         // Executing a request with parameters
@@ -580,6 +629,7 @@ impl Db {
         short_ema: &f64,
         long_ema: &f64,
         last_price: &f64,
+        operation: Operation,
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
@@ -588,12 +638,12 @@ impl Db {
         })?;
 
         let query = "
-            INSERT INTO ema (sec_code, short_ema, long_ema, last_price)
-            VALUES ($1, $2, $3, $4);
+            INSERT INTO ema (sec_code, short_ema, long_ema, last_price, operation)
+            VALUES ($1, $2, $3, $4, $5);
         ";
 
         // Executing insert into ema
-        conn.execute(query, &[&sec_code, short_ema, long_ema, last_price])
+        conn.execute(query, &[&sec_code, short_ema, long_ema, last_price, &operation])
             .await?;
 
         Ok(())
@@ -611,7 +661,7 @@ impl Db {
         })?;
 
         let query = "
-            SELECT sec_code, short_ema, long_ema, last_price, update_timestamptz
+            SELECT sec_code, short_ema, long_ema, last_price, operation, update_timestamptz
             FROM ema
             WHERE sec_code = $1
             ORDER BY update_timestamptz DESC LIMIT 100000;
@@ -630,6 +680,7 @@ impl Db {
             let short_ema = row.get("short_ema");
             let long_ema = row.get("long_ema");
             let last_price = row.get("last_price");
+            let operation = row.get("operation");
             let timestamptz: DateTime<Utc> = row.get("update_timestamptz");
 
             let ema_frame = Ema {
@@ -637,6 +688,7 @@ impl Db {
                 short_ema,
                 long_ema,
                 last_price,
+                operation,
                 timestamptz,
             };
 
