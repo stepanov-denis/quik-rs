@@ -2,8 +2,8 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use postgres_types::{ToSql,FromSql};
 use chrono::{DateTime, NaiveDateTime, Utc};
+use postgres_types::{FromSql, ToSql};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use tracing::error;
@@ -53,7 +53,9 @@ impl Candle {
 
         let fields = [self.open, self.high, self.low, self.close, self.volume];
 
-        fields.iter().all(|&value| value.is_finite() && value > EPSILON)
+        fields
+            .iter()
+            .all(|&value| value.is_finite() && value > EPSILON)
     }
 }
 
@@ -188,15 +190,16 @@ impl Db {
         Ok(())
     }
 
-    /// Creating a table of EMA
-    pub async fn create_ema(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+    /// Create type operation
+    pub async fn crate_type_operation(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
             error!("error get a connection from the pool: {:?}", e);
             e
         })?;
 
-        // Create table
         let query = "
             DO $$
             BEGIN
@@ -213,7 +216,24 @@ impl Db {
                 END IF;
             END;
             $$;
+        ";
 
+        // Executing the command to create a type
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
+
+    /// Creating a table of EMA
+    pub async fn create_ema(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        // Create table
+        let query = "
             CREATE TABLE IF NOT EXISTS ema (
                 id SERIAL PRIMARY KEY,
                 sec_code VARCHAR(12),
@@ -332,6 +352,10 @@ impl Db {
             error!("create table historical_trades error: {}", e);
         }
 
+        if let Err(e) = self.crate_type_operation().await {
+            error!("create type operation error: {}", e);
+        }
+
         if let Err(e) = self.create_ema().await {
             error!("create table ema error: {}", e);
         }
@@ -406,7 +430,7 @@ impl Db {
                 class_code, instrument_status, sec_code, instr_short_name, update_timestamptz
             );
 
-            let hysteresis_percentage = 1.0; // %
+            let hysteresis_percentage = 2.0; // %
             let hysteresis_periods = 5; // periods
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
@@ -595,7 +619,10 @@ impl Db {
     }
 
     /// Get last_price from historical_trades table
-    pub async fn get_last_price(&self, sec_code: &str) -> Result<f64, RunError<bb8_postgres::tokio_postgres::Error>> {
+    pub async fn get_last_price(
+        &self,
+        sec_code: &str,
+    ) -> Result<f64, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
             error!("error get a connection from the pool: {:?}", e);
@@ -619,7 +646,6 @@ impl Db {
         let last_price = row.get("last_price");
 
         Ok(last_price)
-
     }
 
     /// Insert EMA in ema table
@@ -643,8 +669,11 @@ impl Db {
         ";
 
         // Executing insert into ema
-        conn.execute(query, &[&sec_code, short_ema, long_ema, last_price, &operation])
-            .await?;
+        conn.execute(
+            query,
+            &[&sec_code, short_ema, long_ema, last_price, &operation],
+        )
+        .await?;
 
         Ok(())
     }

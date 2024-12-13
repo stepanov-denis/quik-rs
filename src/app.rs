@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use eframe::egui;
 use egui::Color32;
 use egui_plot::GridMark;
-use egui_plot::{Line, Plot, PlotPoints, Points, MarkerShape};
+use egui_plot::{Line, MarkerShape, Plot, PlotPoints, Points};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
@@ -57,7 +57,7 @@ impl MyApp {
     ) -> Self {
         let plot_sec_codes = Arc::new(Mutex::new(Vec::new()));
         let plot_sec_codes_cloned = Arc::clone(&plot_sec_codes);
-    
+
         tokio::spawn(async move {
             let instruments = instruments.read().await;
             let mut plot_sec_codes = plot_sec_codes_cloned.lock().unwrap();
@@ -65,7 +65,7 @@ impl MyApp {
                 plot_sec_codes.push(instrument.sec_code.clone());
             }
         });
-    
+
         let plot_sec_code = Arc::new(Mutex::new(String::from("SBER")));
 
         let app = Self {
@@ -131,7 +131,10 @@ impl eframe::App for MyApp {
                 .selected_text(&*plot_sec_code)
                 .show_ui(ui, |ui| {
                     for code in plot_sec_codes.iter() {
-                        if ui.selectable_value(&mut *plot_sec_code, code.clone(), code).clicked() {
+                        if ui
+                            .selectable_value(&mut *plot_sec_code, code.clone(), code)
+                            .clicked()
+                        {
                             fetch_required = true;
                         }
                     }
@@ -183,9 +186,15 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                let short_line = Line::new(short_ema_points).color(Color32::RED).name("Short EMA");
-                let long_line = Line::new(long_ema_points).color(Color32::GREEN).name("Long EMA");
-                let last_price_line = Line::new(last_price_points).color(Color32::BLUE).name(sec_code);
+                let short_line = Line::new(short_ema_points)
+                    .color(Color32::RED)
+                    .name("Short EMA");
+                let long_line = Line::new(long_ema_points)
+                    .color(Color32::GREEN)
+                    .name("Long EMA");
+                let last_price_line = Line::new(last_price_points)
+                    .color(Color32::BLUE)
+                    .name(sec_code);
 
                 // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let signal_buy_points: PlotPoints = ema
@@ -223,13 +232,13 @@ impl eframe::App for MyApp {
 
                 // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let trade_buy_points: PlotPoints = ema
-                .iter()
-                .filter(|e| e.operation == Operation::TradeBuy)
-                .map(|e| {
-                    let datetime: DateTime<Utc> = e.timestamptz;
-                    [datetime.timestamp_millis() as f64, e.last_price]
-                })
-                .collect();
+                    .iter()
+                    .filter(|e| e.operation == Operation::TradeBuy)
+                    .map(|e| {
+                        let datetime: DateTime<Utc> = e.timestamptz;
+                        [datetime.timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
 
                 let trade_sell_points: PlotPoints = ema
                     .iter()
@@ -259,7 +268,7 @@ impl eframe::App for MyApp {
                     .view_aspect(2.0)
                     .x_axis_formatter(|mark: GridMark, _range: &std::ops::RangeInclusive<f64>| {
                         let datetime = DateTime::from_timestamp_millis(mark.value as i64)
-                            .expect("Invalid timestamp");                      
+                            .expect("Invalid timestamp");
                         datetime.format("%Y-%m-%d %H:%M:%S").to_string()
                     })
                     .label_formatter(|name, value| {

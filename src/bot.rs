@@ -4,15 +4,15 @@ use crate::ema;
 use crate::psql::Db;
 use crate::psql::Instrument;
 use crate::psql::Operation;
-use crate::signal::Signal;
-use crate::quik::TradeInfo;
 use crate::quik::IsSell;
 use crate::quik::Terminal;
+use crate::quik::TradeInfo;
 use crate::quik::TRADE_SENDER;
+use crate::signal::Signal;
 use chrono::{Datelike, Timelike, Utc, Weekday};
-use tokio::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use std::error::Error;
 use std::sync::Arc;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard as TokioMutexGuard;
 use tokio::sync::RwLock;
@@ -100,12 +100,13 @@ pub async fn trade(
     }
 
     // Preparing for trading
-    let timeframe: i32 = 5;
-    let short_number_of_candles: i32 = 50;
-    let long_number_of_candles: i32 = 200;
+    let timeframe: i32 = 30;
+    let short_number_of_candles: i32 = 8;
+    let long_number_of_candles: i32 = 21;
 
     // Инициализируем канал
-    let (sender, mut receiver): (UnboundedSender<TradeInfo>, UnboundedReceiver<TradeInfo>) = mpsc::unbounded_channel();
+    let (sender, mut receiver): (UnboundedSender<TradeInfo>, UnboundedReceiver<TradeInfo>) =
+        mpsc::unbounded_channel();
 
     // Инициализируем TRADE_SENDER
     {
@@ -200,7 +201,7 @@ pub async fn trade(
                 if is_trading_time() {
                     let mut instruments = instruments.write().await;
                     for instrument in instruments.iter_mut() {
-                        if instrument.sec_code == "SBER" {
+                        // if instrument.sec_code == "SBER" {
                             // Get access to the terminal
                             let terminal_guard = terminal.lock().await;
 
@@ -276,7 +277,7 @@ pub async fn trade(
                                     Err(e) => error!("create transaction_str error: {}", e),
                                 }
                             }
-                        }
+                        // }
 
                     }
                 } else {
