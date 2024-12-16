@@ -654,10 +654,10 @@ impl Db {
         })?;
 
         let last_price: f64 = row
-        .try_get::<_, Decimal>("last_price")
-        .ok()
-        .and_then(|dec| dec.to_f64())
-        .unwrap_or_default();
+            .try_get::<_, Decimal>("last_price")
+            .ok()
+            .and_then(|dec| dec.to_f64())
+            .unwrap_or_default();
 
         Ok(last_price)
     }

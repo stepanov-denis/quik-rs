@@ -33,7 +33,7 @@
 //! Upon termination of receiving information on applications and transactions, the lists
 //! of received instruments are cleared.
 // #![allow(dead_code)]
-use chrono::{NaiveDate, NaiveTime, NaiveDateTime, DateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use encoding_rs::WINDOWS_1251;
 use lazy_static::lazy_static;
 use libc::{c_char, c_double, c_long, c_ulonglong, intptr_t};
@@ -44,18 +44,18 @@ use std::ffi::{CStr, CString, NulError};
 use std::fmt::{self, Debug};
 use std::str::{self, FromStr};
 use std::string::FromUtf8Error;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, info};
 
-lazy_static! {
-    static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
-        Arc::new((Mutex::new(false), Condvar::new()));
-    static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
-        Arc::new((Mutex::new(false), Condvar::new()));
-    static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
-        Arc::new((Mutex::new(false), Condvar::new()));
-}
+// lazy_static! {
+//     static ref ORDER_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+//         Arc::new((Mutex::new(false), Condvar::new()));
+//     static ref TRADE_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+//         Arc::new((Mutex::new(false), Condvar::new()));
+//     static ref TRANSACTION_CALLBACK_RECEIVED: Arc<(Mutex<bool>, Condvar)> =
+//         Arc::new((Mutex::new(false), Condvar::new()));
+// }
 
 lazy_static! {
     pub static ref TRADE_SENDER: Mutex<Option<UnboundedSender<TradeInfo>>> = Mutex::new(None);
@@ -287,7 +287,50 @@ pub struct TradeInfo {
     pub quantity: i64,
     pub is_sell: IsSell,
     pub value: f64,
-    pub update_timestamp: DateTime<Utc>,
+    pub date: NaiveDate,
+    pub time: NaiveTime,
+}
+
+impl TradeInfo {
+    pub fn is_valid(&self) -> bool {
+        self.date != NaiveDate::default() && self.time != NaiveTime::default()
+    }
+}
+
+#[derive(Debug)]
+enum DecodeError {
+    NullPointer,
+    InvalidString(NulError),
+    DecodeError,
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl error::Error for DecodeError {}
+
+#[derive(Debug)]
+enum DateTimeError {
+    InvalidDate,
+    InvalidTime,
+    ParseError(chrono::ParseError),
+}
+
+impl fmt::Display for DateTimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl error::Error for DateTimeError {}
+
+impl From<chrono::ParseError> for DateTimeError {
+    fn from(err: chrono::ParseError) -> DateTimeError {
+        DateTimeError::ParseError(err)
+    }
 }
 
 /// The `Terminal` structure is used to interact with the QUIK trading terminal through the library Trans2QUIK.dll.
@@ -499,8 +542,10 @@ impl Clone for Terminal {
             trans2quik_is_dll_connected: self.trans2quik_is_dll_connected,
             trans2quik_send_sync_transaction: self.trans2quik_send_sync_transaction,
             trans2quik_send_async_transaction: self.trans2quik_send_async_transaction,
-            trans2quik_set_connection_status_callback: self.trans2quik_set_connection_status_callback,
-            trans2quik_set_transactions_reply_callback: self.trans2quik_set_transactions_reply_callback,
+            trans2quik_set_connection_status_callback: self
+                .trans2quik_set_connection_status_callback,
+            trans2quik_set_transactions_reply_callback: self
+                .trans2quik_set_transactions_reply_callback,
             trans2quik_subscribe_orders: self.trans2quik_subscribe_orders,
             trans2quik_subscribe_trades: self.trans2quik_subscribe_trades,
             trans2quik_start_orders: self.trans2quik_start_orders,
@@ -1000,8 +1045,7 @@ impl Terminal {
         let terminal_instance = Arc::new(Mutex::new(terminal_clone));
         *TERMINAL_INSTANCE.lock().unwrap() = Some(terminal_instance);
 
-
-        unsafe { (self.trans2quik_start_trades)(Self::trade_status_callback) }
+        unsafe { (self.trans2quik_start_trades)(trade_status_callback) }
     }
 
     /// The function interrupts the operation of the TRANS2QUIK_START_ORDERS function and clears
@@ -1028,86 +1072,6 @@ impl Terminal {
         info!("TRANS2QUIK_UNSUBSCRIBE_TRADES -> {:?}", trans2quik_result);
 
         Ok(trans2quik_result)
-    }
-
-    /// Callback function to get information about the transaction.
-    unsafe extern "C" fn trade_status_callback(
-        mode: c_long,
-        trade_num: c_ulonglong,
-        order_num: c_ulonglong,
-        class_code: *mut c_char,
-        sec_code: *mut c_char,
-        price: c_double,
-        quantity: i64,
-        is_sell: c_long,
-        value: c_double,
-        trade_descriptor: intptr_t,
-    ) {
-        if let Some(terminal_instance) = TERMINAL_INSTANCE.lock().unwrap().as_ref() {
-            let terminal = terminal_instance.lock().unwrap();
-
-            let mode = Mode::from(mode);
-
-            let class_code = if !class_code.is_null() {
-                let c_str = CStr::from_ptr(class_code);
-                let bytes = c_str.to_bytes();
-                let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
-                decoded_str.into_owned().to_owned()
-            } else {
-                String::from("class_code is null")
-            };
-
-            let sec_code = if !sec_code.is_null() {
-                let c_str = CStr::from_ptr(sec_code);
-                let bytes = c_str.to_bytes();
-                let (decoded_str, _, _) = WINDOWS_1251.decode(bytes);
-                decoded_str.into_owned().to_owned()
-            } else {
-                String::from("sec_code is null")
-            };
-
-            let is_sell = IsSell::from(is_sell);
-
-            let date = (terminal.trans2quik_trade_date)(trade_descriptor);
-            let date_str = format!("{:08}", date);
-            let naive_date = NaiveDate::parse_from_str(&date_str, "%Y%m%d").unwrap();
-            let trade_date = naive_date.format("%Y-%m-%d").to_string();
-            
-
-            let time = (terminal.trans2quik_trade_time)(trade_descriptor);
-            let time_str = format!("{:06}", time);
-            let naive_time = NaiveTime::parse_from_str(&time_str, "%H%M%S").unwrap();
-            let trade_time = naive_time.format("%H:%M:%S").to_string();
-
-            let naive_date_time = NaiveDateTime::new(naive_date, naive_time);
-
-            let update_timestamp = naive_date_time.and_utc();
-
-            info!("TRANS2QUIK_TRADE_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);
-
-            if let Some(sender) = TRADE_SENDER.lock().unwrap().as_ref() {
-                let trade_info = TradeInfo {
-                    mode,
-                    trade_num,
-                    order_num,
-                    class_code,
-                    sec_code,
-                    price,
-                    quantity,
-                    is_sell,
-                    value,
-                    update_timestamp,
-                };
-
-                if let Err(err) = sender.send(trade_info) {
-                    error!("trade_status_callback send error: {:?}", err);
-                }
-            } else {
-                error!("TRADE_SENDER is not initialized");
-            }
-        } else {
-            error!("TERMINAL_INSTANCE is not initialized");
-        }
     }
 }
 
@@ -1136,6 +1100,63 @@ fn extract_string_from_vec(vec_i8: Vec<i8>) -> Result<String, FromUtf8Error> {
     let (decoded_str, _, _) = WINDOWS_1251.decode(vec_u8_trimmed);
 
     Ok(decoded_str.into_owned())
+}
+
+fn decode_class_or_sec_code(code: *mut c_char) -> Result<String, DecodeError> {
+    if code.is_null() {
+        return Err(DecodeError::NullPointer);
+    }
+
+    // Safe block to convert C string to Rust slice
+    let c_str = unsafe { CStr::from_ptr(code) };
+
+    // Attempt to convert the C string to bytes
+    let bytes = c_str.to_bytes();
+
+    // Decode the bytes using WINDOWS-1251 encoding
+    let (decoded_str, _, had_errors) = WINDOWS_1251.decode(bytes);
+
+    // Check for decoding errors
+    if had_errors {
+        return Err(DecodeError::DecodeError);
+    }
+
+    // Convert the Cow<str> to String and return
+    Ok(decoded_str.into_owned())
+}
+
+fn format_trade_date(
+    terminal: &MutexGuard<'_, Terminal>,
+    trade_descriptor: intptr_t,
+) -> Result<NaiveDate, DateTimeError> {
+    let date = unsafe { (terminal.trans2quik_trade_date)(trade_descriptor) };
+
+    if date <= 0 {
+        return Err(DateTimeError::InvalidDate);
+    }
+
+    let date_str = format!("{:08}", date);
+
+    let naive_date = NaiveDate::parse_from_str(&date_str, "%Y%m%d")?;
+
+    Ok(naive_date)
+}
+
+fn format_trade_time(
+    terminal: &MutexGuard<'_, Terminal>,
+    trade_descriptor: intptr_t,
+) -> Result<NaiveTime, DateTimeError> {
+    let time = unsafe { (terminal.trans2quik_trade_time)(trade_descriptor) };
+
+    if time <= 0 {
+        return Err(DateTimeError::InvalidTime);
+    }
+
+    let time_str = format!("{:06}", time);
+
+    let naive_time = NaiveTime::parse_from_str(&time_str, "%H%M%S")?;
+
+    Ok(naive_time)
 }
 
 /// Callback function for status monitoring connections.
@@ -1191,10 +1212,10 @@ unsafe extern "C" fn transaction_reply_callback(
 
     info!("TRANS2QUIK_TRANSACTION_REPLY_CALLBACK -> {:?}, error_code: {}, reply_code: {}, trans_id: {}, order_num: {}, error_message: {}", trans2quik_result, error_code, reply_code, trans_id, order_num, error_message);
 
-    let (lock, cvar) = TRANSACTION_CALLBACK_RECEIVED.as_ref();
-    let mut received = lock.lock().unwrap();
-    *received = true;
-    cvar.notify_one();
+    // let (lock, cvar) = TRANSACTION_CALLBACK_RECEIVED.as_ref();
+    // let mut received = lock.lock().unwrap();
+    // *received = true;
+    // cvar.notify_one();
 }
 
 /// Callback function to get information about the order parameters.
@@ -1239,10 +1260,96 @@ unsafe extern "C" fn order_status_callback(
 
     info!("TRANS2QUIK_ORDER_STATUS_CALLBACK -> mode: {:?}, trans_id: {:?}, order_num: {}, class_code: {}, sec_code: {}, price: {}, balance: {}, value: {}, is_sell: {:?}, status: {:?}", mode, trans_id, order_num, class_code, sec_code, price, balance, value, is_sell, status);
 
-    let (lock, cvar) = ORDER_CALLBACK_RECEIVED.as_ref();
-    let mut received = lock.lock().unwrap();
-    *received = true;
-    cvar.notify_one();
+    // let (lock, cvar) = ORDER_CALLBACK_RECEIVED.as_ref();
+    // let mut received = lock.lock().unwrap();
+    // *received = true;
+    // cvar.notify_one();
+}
+
+/// Callback function to get information about the transaction.
+unsafe extern "C" fn trade_status_callback(
+    mode: c_long,
+    trade_num: c_ulonglong,
+    order_num: c_ulonglong,
+    class_code: *mut c_char,
+    sec_code: *mut c_char,
+    price: c_double,
+    quantity: i64,
+    is_sell: c_long,
+    value: c_double,
+    trade_descriptor: intptr_t,
+) {
+    if let Some(terminal_instance) = TERMINAL_INSTANCE.lock().unwrap().as_ref() {
+        let terminal = terminal_instance.lock().unwrap();
+
+        let mode = Mode::from(mode);
+
+        let class_code = match decode_class_or_sec_code(class_code) {
+            Ok(class_code) => class_code,
+            Err(e) => {
+                let error = format!("decode class_code error: {:?}", e);
+                error!("{}", error);
+                String::from(error)
+            }
+        };
+
+        let sec_code = match decode_class_or_sec_code(sec_code) {
+            Ok(sec_code) => sec_code,
+            Err(e) => {
+                let error = format!("decode sec_code error: {:?}", e);
+                error!("{}", error);
+                String::from(error)
+            }
+        };
+
+        let is_sell = IsSell::from(is_sell);
+
+        let date = match format_trade_date(&terminal, trade_descriptor) {
+            Ok(date) => date,
+            Err(e) => {
+                error!("format_trade_error: {}", e);
+                NaiveDate::default()
+            }
+        };
+
+        let time = match format_trade_time(&terminal, trade_descriptor) {
+            Ok(time) => time,
+            Err(e) => {
+                error!("format_trade_time error: {}", e);
+                NaiveTime::default()
+            }
+        };
+
+        let naive_date_time = NaiveDateTime::new(date, time);
+
+        let update_timestamp = naive_date_time.and_utc();
+
+        info!("TRANS2QUIK_TRADE_STATUS_CALLBACK -> mode: {:?}, trade_num: {}, order_num: {}, class_code: {}, sec_code: {}, price: {}, quantity: {}, is_sell: {:?}, value: {}", mode, trade_num, order_num, class_code, sec_code, price, quantity, is_sell, value);
+
+        if let Some(sender) = TRADE_SENDER.lock().unwrap().as_ref() {
+            let trade_info = TradeInfo {
+                mode,
+                trade_num,
+                order_num,
+                class_code,
+                sec_code,
+                price,
+                quantity,
+                is_sell,
+                value,
+                date,
+                time,
+            };
+
+            if let Err(err) = sender.send(trade_info) {
+                error!("trade_status_callback send error: {}", err);
+            }
+        } else {
+            error!("TRADE_SENDER is not initialized");
+        }
+    } else {
+        error!("TERMINAL_INSTANCE is not initialized");
+    }
 }
 
 #[cfg(test)]

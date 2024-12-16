@@ -140,50 +140,57 @@ pub async fn trade(
             },
             Some(trade_info) = receiver.recv() => {
                 info!("trade_status_callback received: {:?}", trade_info);
+                if trade_info.is_valid() {
+                    // Calculate the short EMA
+                    let short_ema = match ema::Ema::calc(
+                        &database,
+                        &trade_info.sec_code,
+                        timeframe,
+                        short_number_of_candles,
+                    ).await {
+                        Ok(short_ema) => {
+                            info!("short_ema: {}", short_ema);
+                            short_ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
 
-                // Calculate the short EMA
-                let short_ema = match ema::Ema::calc(
-                    &database,
-                    &trade_info.sec_code,
-                    timeframe,
-                    short_number_of_candles,
-                ).await {
-                    Ok(short_ema) => {
-                        info!("short_ema: {}", short_ema);
-                        short_ema
+                    // Calculate the long EMA
+                    let long_ema = match ema::Ema::calc(
+                        &database,
+                        &trade_info.sec_code,
+                        timeframe,
+                        long_number_of_candles,
+                    ).await {
+                        Ok(long_ema) => {
+                            info!("long_ema: {}", long_ema);
+                            long_ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
+
+                    let is_sell = IsSell::from(trade_info.is_sell);
+
+                    let operation = match is_sell {
+                        IsSell::Buy => Operation::TradeBuy,
+                        IsSell::Sell => Operation::TradeSell,
+                    };
+
+                    let naive_date_time = NaiveDateTime::new(trade_info.date, trade_info.time);
+
+                    let update_timestamp = naive_date_time.and_utc();
+
+                    if let Err(e) = &database.insert_ema(&trade_info.sec_code, &short_ema, &long_ema, &trade_info.price, operation, update_timestamp).await {
+                        error!("insert into ema error: {}", e);
                     }
-                    Err(e) => {
-                        error!("{}", e);
-                        continue;
-                    }
-                };
-
-                // Calculate the long EMA
-                let long_ema = match ema::Ema::calc(
-                    &database,
-                    &trade_info.sec_code,
-                    timeframe,
-                    long_number_of_candles,
-                ).await {
-                    Ok(long_ema) => {
-                        info!("long_ema: {}", long_ema);
-                        long_ema
-                    }
-                    Err(e) => {
-                        error!("{}", e);
-                        continue;
-                    }
-                };
-
-                let is_sell = IsSell::from(trade_info.is_sell);
-
-                let operation = match is_sell {
-                    IsSell::Buy => Operation::TradeBuy,
-                    IsSell::Sell => Operation::TradeSell,
-                };
-
-                if let Err(e) = &database.insert_ema(&trade_info.sec_code, &short_ema, &long_ema, &trade_info.price, operation, trade_info.update_timestamp).await {
-                    error!("insert into ema error: {}", e);
+                } else {
+                    error!("trade_info invalid");
                 }
             },
             result = async {
