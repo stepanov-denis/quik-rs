@@ -2,7 +2,7 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use postgres_types::{FromSql, ToSql};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -34,7 +34,7 @@ pub struct Ema {
     pub long_ema: f64,
     pub last_price: f64,
     pub operation: Operation,
-    pub timestamptz: DateTime<Utc>,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug)]
@@ -179,8 +179,7 @@ impl Db {
                 last_price DECIMAL(15,6),
                 last_volume DECIMAL(15,6),
                 last_price_time TIME,
-                trade_date DATE,
-                update_timestamptz TIMESTAMPTZ DEFAULT NOW()
+                trade_date DATE
             );
         ";
 
@@ -241,7 +240,7 @@ impl Db {
                 long_ema DOUBLE PRECISION,
                 last_price DOUBLE PRECISION,
                 operation OPERATION,
-                update_timestamptz TIMESTAMPTZ DEFAULT NOW()
+                update_timestamp TIMESTAMP DEFAULT NOW()
             );
         ";
 
@@ -384,11 +383,11 @@ impl Db {
 
         let query = "
         SELECT DISTINCT ON (sec_code)
-            class_code, instrument_status, sec_code, instr_short_name, update_timestamptz
+            class_code, instrument_status, sec_code, instr_short_name, trade_date, last_price_time
         FROM historical_trades
         WHERE class_code = $1
           AND instrument_status = $2
-        ORDER BY sec_code, update_timestamptz DESC
+        ORDER BY sec_code ASC, trade_date DESC, last_price_time DESC; 
     ";
 
         let rows = conn
@@ -404,14 +403,19 @@ impl Db {
 
         // Print column names
         println!(
-            "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
-            "class_code", "status", "sec_code", "instr_short_name", "update_timestamptz"
+            "{:>12} | {:>32} | {:>12} | {:>20} | {:>10} | {:>8}",
+            "class_code",
+            "instrument_status",
+            "sec_code",
+            "instr_short_name",
+            "trade_date",
+            "last_price_time"
         );
 
         // Print the dividing line
         println!(
-            "{:-<12}-+-{:-<32}-+-{:-<12}-+-{:-<20}-+-{:-<30}-",
-            "", "", "", "", ""
+            "{:-<12}-+-{:-<32}-+-{:-<12}-+-{:-<20}-+-{:-<10}-+-{:-<8}-",
+            "", "", "", "", "", ""
         );
 
         // Creating a vector for Instruments
@@ -423,11 +427,17 @@ impl Db {
             let instrument_status: String = row.get("instrument_status");
             let sec_code: String = row.get("sec_code");
             let instr_short_name: String = row.get("instr_short_name");
-            let update_timestamptz: DateTime<Utc> = row.get("update_timestamptz");
+            let trade_date: NaiveDate = row.get("trade_date");
+            let last_price_time: NaiveTime = row.get("last_price_time");
 
             println!(
-                "{:<12} | {:>32} | {:>12} | {:>20} | {:>30}",
-                class_code, instrument_status, sec_code, instr_short_name, update_timestamptz
+                "{:<12} | {:>32} | {:>12} | {:>20} | {:>10} | {:>8}",
+                class_code,
+                instrument_status,
+                sec_code,
+                instr_short_name,
+                trade_date,
+                last_price_time
             );
 
             let hysteresis_percentage = 2.0; // %
@@ -643,7 +653,11 @@ impl Db {
             e
         })?;
 
-        let last_price = row.get("last_price");
+        let last_price: f64 = row
+        .try_get::<_, Decimal>("last_price")
+        .ok()
+        .and_then(|dec| dec.to_f64())
+        .unwrap_or_default();
 
         Ok(last_price)
     }
@@ -656,6 +670,7 @@ impl Db {
         long_ema: &f64,
         last_price: &f64,
         operation: Operation,
+        update_timestamp: DateTime<Utc>,
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
@@ -664,14 +679,21 @@ impl Db {
         })?;
 
         let query = "
-            INSERT INTO ema (sec_code, short_ema, long_ema, last_price, operation)
-            VALUES ($1, $2, $3, $4, $5);
+            INSERT INTO ema (sec_code, short_ema, long_ema, last_price, operation, update_timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6);
         ";
 
         // Executing insert into ema
         conn.execute(
             query,
-            &[&sec_code, short_ema, long_ema, last_price, &operation],
+            &[
+                &sec_code,
+                short_ema,
+                long_ema,
+                last_price,
+                &operation,
+                &update_timestamp,
+            ],
         )
         .await?;
 
@@ -690,10 +712,10 @@ impl Db {
         })?;
 
         let query = "
-            SELECT sec_code, short_ema, long_ema, last_price, operation, update_timestamptz
+            SELECT sec_code, short_ema, long_ema, last_price, operation, update_timestamp
             FROM ema
             WHERE sec_code = $1
-            ORDER BY update_timestamptz DESC LIMIT 100000;
+            ORDER BY update_timestamp DESC LIMIT 100000;
         ";
 
         // Executing
@@ -710,7 +732,7 @@ impl Db {
             let long_ema = row.get("long_ema");
             let last_price = row.get("last_price");
             let operation = row.get("operation");
-            let timestamptz: DateTime<Utc> = row.get("update_timestamptz");
+            let timestamp: DateTime<Utc> = row.get("update_timestamp");
 
             let ema_frame = Ema {
                 sec_code,
@@ -718,7 +740,7 @@ impl Db {
                 long_ema,
                 last_price,
                 operation,
-                timestamptz,
+                timestamp,
             };
 
             ema.push(ema_frame);

@@ -9,7 +9,7 @@ use crate::quik::Terminal;
 use crate::quik::TradeInfo;
 use crate::quik::TRADE_SENDER;
 use crate::signal::Signal;
-use chrono::{Datelike, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, Local, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -175,17 +175,6 @@ pub async fn trade(
                     }
                 };
 
-                let last_price = match  database.get_last_price(&trade_info.sec_code).await {
-                    Ok(last_price) => {
-                        info!("last_price: {}", last_price);
-                        last_price
-                    }
-                    Err(e) => {
-                        error!("{}", e);
-                        continue;
-                    }
-                };
-
                 let is_sell = IsSell::from(trade_info.is_sell);
 
                 let operation = match is_sell {
@@ -193,7 +182,7 @@ pub async fn trade(
                     IsSell::Sell => Operation::TradeSell,
                 };
 
-                if let Err(e) = &database.insert_ema(&trade_info.sec_code, &short_ema, &long_ema, &last_price, operation).await {
+                if let Err(e) = &database.insert_ema(&trade_info.sec_code, &short_ema, &long_ema, &trade_info.price, operation, trade_info.update_timestamp).await {
                     error!("insert into ema error: {}", e);
                 }
             },
@@ -201,7 +190,6 @@ pub async fn trade(
                 if is_trading_time() {
                     let mut instruments = instruments.write().await;
                     for instrument in instruments.iter_mut() {
-                        // if instrument.sec_code == "SBER" {
                             // Get access to the terminal
                             let terminal_guard = terminal.lock().await;
 
@@ -250,7 +238,11 @@ pub async fn trade(
                                 }
                             };
 
-                            if let Err(e) = &database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price, Operation::None).await {
+                            let operation = Operation::None;
+
+                            let update_timestamp: DateTime<Utc> = Utc::now();
+
+                            if let Err(e) = &database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price, operation, update_timestamp).await {
                                 error!("insert into ema error: {}", e);
                             }
 
@@ -270,23 +262,23 @@ pub async fn trade(
                                             Signal::Sell => Operation::SignalSell,
                                         };
 
-                                        if let Err(e) = database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price, operation).await {
+                                        let update_timestamp: DateTime<Utc> = Utc::now();
+
+                                        if let Err(e) = database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price, operation, update_timestamp).await {
                                             error!("insert into ema error: {}", e);
                                         }
                                     }
                                     Err(e) => error!("create transaction_str error: {}", e),
                                 }
                             }
-                        // }
-
                     }
                 } else {
                     info!("trading is paused, waiting for the next interval to check trading availability");
                 }
 
                 // Pause before the next iteration
-                info!("sleep 5 seconds");
-                sleep(Duration::from_secs(5)).await;
+                info!("sleep 60 seconds");
+                sleep(Duration::from_secs(60)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {

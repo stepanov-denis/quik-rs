@@ -165,7 +165,7 @@ impl eframe::App for MyApp {
                 let short_ema_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.short_ema]
                     })
                     .collect();
@@ -173,7 +173,7 @@ impl eframe::App for MyApp {
                 let long_ema_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.long_ema]
                     })
                     .collect();
@@ -181,7 +181,7 @@ impl eframe::App for MyApp {
                 let last_price_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
@@ -201,7 +201,7 @@ impl eframe::App for MyApp {
                     .iter()
                     .filter(|e| e.operation == Operation::SignalBuy)
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
@@ -210,7 +210,7 @@ impl eframe::App for MyApp {
                     .iter()
                     .filter(|e| e.operation == Operation::SignalSell)
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
@@ -235,7 +235,7 @@ impl eframe::App for MyApp {
                     .iter()
                     .filter(|e| e.operation == Operation::TradeBuy)
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
@@ -244,7 +244,7 @@ impl eframe::App for MyApp {
                     .iter()
                     .filter(|e| e.operation == Operation::TradeSell)
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamptz;
+                        let datetime: DateTime<Utc> = e.timestamp;
                         [datetime.timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
