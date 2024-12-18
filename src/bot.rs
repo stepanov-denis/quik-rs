@@ -5,11 +5,13 @@ use crate::psql::Db;
 use crate::psql::Instrument;
 use crate::psql::Operation;
 use crate::quik::IsSell;
+use crate::quik::OrderInfo;
 use crate::quik::Terminal;
 use crate::quik::TradeInfo;
-use crate::quik::TRADE_SENDER;
+use crate::quik::ORDER_STATUS_SENDER;
+use crate::quik::TRADE_STATUS_SENDER;
 use crate::signal::Signal;
-use chrono::{DateTime, Datelike, Local, NaiveDateTime, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -105,13 +107,23 @@ pub async fn trade(
     let long_number_of_candles: i32 = 21;
 
     // Инициализируем канал
-    let (sender, mut receiver): (UnboundedSender<TradeInfo>, UnboundedReceiver<TradeInfo>) =
+    let (order_sender, mut order_receiver): (UnboundedSender<OrderInfo>, UnboundedReceiver<OrderInfo>) =
+    mpsc::unbounded_channel();
+
+    // Инициализируем ORDER_STATUS_SENDER
+    {
+        let mut order_status_sender = ORDER_STATUS_SENDER.lock().unwrap();
+        *order_status_sender = Some(order_sender);
+    }
+
+    // Инициализируем канал
+    let (trade_sender, mut trade_receiver): (UnboundedSender<TradeInfo>, UnboundedReceiver<TradeInfo>) =
         mpsc::unbounded_channel();
 
     // Инициализируем TRADE_SENDER
     {
-        let mut trade_sender = TRADE_SENDER.lock().unwrap();
-        *trade_sender = Some(sender);
+        let mut trade_status_sender = TRADE_STATUS_SENDER.lock().unwrap();
+        *trade_status_sender = Some(trade_sender);
     }
 
     loop {
@@ -138,7 +150,60 @@ pub async fn trade(
                     }
                 }
             },
-            Some(trade_info) = receiver.recv() => {
+            Some(order_info) = order_receiver.recv() => {
+                info!("order_status_callback received: {:?}", order_info);
+                if order_info.is_valid() {
+                    // Calculate the short EMA
+                    let short_ema = match ema::Ema::calc(
+                        &database,
+                        &order_info.sec_code,
+                        timeframe,
+                        short_number_of_candles,
+                    ).await {
+                        Ok(short_ema) => {
+                            info!("short_ema: {}", short_ema);
+                            short_ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
+
+                    // Calculate the long EMA
+                    let long_ema = match ema::Ema::calc(
+                        &database,
+                        &order_info.sec_code,
+                        timeframe,
+                        long_number_of_candles,
+                    ).await {
+                        Ok(long_ema) => {
+                            info!("long_ema: {}", long_ema);
+                            long_ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
+
+                    let operation = match order_info.is_sell {
+                        IsSell::Buy => Operation::OrderBuy,
+                        IsSell::Sell => Operation::OrderSell,
+                    };
+
+                    let naive_date_time = NaiveDateTime::new(order_info.date, order_info.time);
+
+                    let update_timestamp = naive_date_time.and_utc();
+
+                    if let Err(e) = &database.insert_ema(&order_info.sec_code, &short_ema, &long_ema, &order_info.price, operation, update_timestamp).await {
+                        error!("insert into ema error: {}", e);
+                    }
+                } else {
+                    error!("order_info invalid");
+                }
+            },
+            Some(trade_info) = trade_receiver.recv() => {
                 info!("trade_status_callback received: {:?}", trade_info);
                 if trade_info.is_valid() {
                     // Calculate the short EMA
@@ -175,9 +240,7 @@ pub async fn trade(
                         }
                     };
 
-                    let is_sell = IsSell::from(trade_info.is_sell);
-
-                    let operation = match is_sell {
+                    let operation = match trade_info.is_sell {
                         IsSell::Buy => Operation::TradeBuy,
                         IsSell::Sell => Operation::TradeSell,
                     };
