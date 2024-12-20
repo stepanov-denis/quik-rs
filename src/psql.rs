@@ -387,6 +387,8 @@ impl Db {
         FROM historical_trades
         WHERE class_code = $1
           AND instrument_status = $2
+          AND trade_date IS NOT NULL
+          AND last_price_time IS NOT NULL
         ORDER BY sec_code ASC, trade_date DESC, last_price_time DESC; 
     ";
 
