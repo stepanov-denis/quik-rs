@@ -8,6 +8,8 @@ use crate::quik::IsSell;
 use crate::quik::OrderInfo;
 use crate::quik::Terminal;
 use crate::quik::TradeInfo;
+use crate::quik::TransactionInfo;
+use crate::quik::TRANSACTION_REPLY_SENDER;
 use crate::quik::ORDER_STATUS_SENDER;
 use crate::quik::TRADE_STATUS_SENDER;
 use crate::signal::Signal;
@@ -107,6 +109,16 @@ pub async fn trade(
     let long_number_of_candles: i32 = 21;
 
     // Инициализируем канал
+    let (transaction_sender, mut transaction_receiver): (UnboundedSender<TransactionInfo>, UnboundedReceiver<TransactionInfo>) =
+    mpsc::unbounded_channel();
+
+    // Инициализируем TRANSACTION_REPLY_SENDER
+    {
+        let mut transaction_reply_sender = TRANSACTION_REPLY_SENDER.lock().unwrap();
+        *transaction_reply_sender = Some(transaction_sender);
+    }
+
+    // Инициализируем канал
     let (order_sender, mut order_receiver): (UnboundedSender<OrderInfo>, UnboundedReceiver<OrderInfo>) =
     mpsc::unbounded_channel();
 
@@ -149,6 +161,50 @@ pub async fn trade(
                         break;
                     }
                 }
+            },
+            Some(transaction_info) = transaction_receiver.recv() => {
+                info!("transaction_reply_callback received: {:?}", transaction_info);
+                    // Calculate the short EMA
+                    let short_ema = match ema::Ema::calc(
+                        &database,
+                        &transaction_info.sec_code,
+                        timeframe,
+                        short_number_of_candles,
+                    ).await {
+                        Ok(short_ema) => {
+                            info!("short_ema: {}", short_ema);
+                            short_ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
+
+                    // Calculate the long EMA
+                    let long_ema = match ema::Ema::calc(
+                        &database,
+                        &transaction_info.sec_code,
+                        timeframe,
+                        long_number_of_candles,
+                    ).await {
+                        Ok(long_ema) => {
+                            info!("long_ema: {}", long_ema);
+                            long_ema
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            continue;
+                        }
+                    };
+
+                    let operation = Operation::TransactionReply;
+
+                    let update_timestamp: DateTime<Utc> = Utc::now();
+
+                    if let Err(e) = &database.insert_ema(&transaction_info.sec_code, short_ema, long_ema, transaction_info.price, operation, update_timestamp).await {
+                        error!("insert into ema error: {}", e);
+                    }
             },
             Some(order_info) = order_receiver.recv() => {
                 info!("order_status_callback received: {:?}", order_info);
@@ -196,7 +252,7 @@ pub async fn trade(
 
                     let update_timestamp = naive_date_time.and_utc();
 
-                    if let Err(e) = &database.insert_ema(&order_info.sec_code, &short_ema, &long_ema, &order_info.price, operation, update_timestamp).await {
+                    if let Err(e) = &database.insert_ema(&order_info.sec_code, short_ema, long_ema, order_info.price, operation, update_timestamp).await {
                         error!("insert into ema error: {}", e);
                     }
                 } else {
@@ -249,7 +305,7 @@ pub async fn trade(
 
                     let update_timestamp = naive_date_time.and_utc();
 
-                    if let Err(e) = &database.insert_ema(&trade_info.sec_code, &short_ema, &long_ema, &trade_info.price, operation, update_timestamp).await {
+                    if let Err(e) = &database.insert_ema(&trade_info.sec_code, short_ema, long_ema, trade_info.price, operation, update_timestamp).await {
                         error!("insert into ema error: {}", e);
                     }
                 } else {
@@ -312,7 +368,7 @@ pub async fn trade(
 
                             let update_timestamp: DateTime<Utc> = Utc::now();
 
-                            if let Err(e) = &database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price, operation, update_timestamp).await {
+                            if let Err(e) = &database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
                                 error!("insert into ema error: {}", e);
                             }
 
@@ -334,7 +390,7 @@ pub async fn trade(
 
                                         let update_timestamp: DateTime<Utc> = Utc::now();
 
-                                        if let Err(e) = database.insert_ema(&instrument.sec_code, &short_ema, &long_ema, &last_price, operation, update_timestamp).await {
+                                        if let Err(e) = database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
                                             error!("insert into ema error: {}", e);
                                         }
                                     }

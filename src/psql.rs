@@ -11,6 +11,8 @@ use tracing::error;
 #[derive(Debug, ToSql, FromSql, PartialEq)]
 #[postgres(name = "operation")]
 pub enum Operation {
+    #[postgres(name = "transaction_reply")]
+    TransactionReply,
     #[postgres(name = "signal_buy")]
     SignalBuy,
     #[postgres(name = "signal_sell")]
@@ -204,6 +206,7 @@ impl Db {
             BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'operation') THEN
                     CREATE TYPE operation AS ENUM (
+                        'transaction_reply',
                         'signal_buy',
                         'signal_sell',
                         'order_buy',
@@ -643,7 +646,7 @@ impl Db {
 
         let query = "
             SELECT last_price
-            FROM current_trades
+            FROM historical_trades
             WHERE sec_code = $1
             ORDER BY trade_date DESC, last_price_time DESC
             LIMIT 1;
@@ -659,7 +662,7 @@ impl Db {
             .try_get::<_, Decimal>("last_price")
             .ok()
             .and_then(|dec| dec.to_f64())
-            .unwrap_or_default();
+            .unwrap();
 
         Ok(last_price)
     }
@@ -668,9 +671,9 @@ impl Db {
     pub async fn insert_ema(
         &self,
         sec_code: &str,
-        short_ema: &f64,
-        long_ema: &f64,
-        last_price: &f64,
+        short_ema: f64,
+        long_ema: f64,
+        last_price: f64,
         operation: Operation,
         update_timestamp: DateTime<Utc>,
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
@@ -679,6 +682,8 @@ impl Db {
             error!("error get a connection from the pool: {:?}", e);
             e
         })?;
+
+        let update_timestamp = update_timestamp.to_rfc3339();
 
         let query = "
             INSERT INTO ema (sec_code, short_ema, long_ema, last_price, operation, update_timestamp)
@@ -690,9 +695,9 @@ impl Db {
             query,
             &[
                 &sec_code,
-                short_ema,
-                long_ema,
-                last_price,
+                &short_ema,
+                &long_ema,
+                &last_price,
                 &operation,
                 &update_timestamp,
             ],

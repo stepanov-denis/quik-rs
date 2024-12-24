@@ -16,6 +16,9 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
+type EmaResult = Result<Vec<Ema>, RunError<bb8_postgres::tokio_postgres::Error>>;
+type SharedEmaData = Arc<Mutex<Option<EmaResult>>>;
+
 /// AppCommand represents the possible commands to control the QUIK Terminal state.
 ///
 /// Variants:
@@ -35,7 +38,7 @@ pub struct MyApp {
     allowed_to_close: bool,
     command_sender: mpsc::UnboundedSender<AppCommand>,
     database: Arc<Db>,
-    ema_data: Arc<Mutex<Option<Result<Vec<Ema>, RunError<bb8_postgres::tokio_postgres::Error>>>>>,
+    ema_data: SharedEmaData,
     plot_sec_codes: Arc<Mutex<Vec<String>>>,
     plot_sec_code: Arc<Mutex<String>>,
 }
