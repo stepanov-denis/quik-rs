@@ -48,14 +48,17 @@ async fn main() -> eframe::Result<(), Box<dyn Error>> {
         ..Default::default()
     };
 
+    let database_clone = Arc::clone(&database);
+    let instruments_clone = Arc::clone(&instruments);
+
     eframe::run_native(
         "QUIK bot",
         options,
         Box::new(|_cc| {
             Ok(Box::new(app::MyApp::new(
-                command_sender.clone(),
-                Arc::clone(&database),
-                Arc::clone(&instruments),
+                command_sender,
+                database_clone,
+                instruments_clone,
             )))
         }),
     )?;
