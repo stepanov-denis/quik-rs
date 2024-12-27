@@ -9,9 +9,9 @@ use crate::quik::OrderInfo;
 use crate::quik::Terminal;
 use crate::quik::TradeInfo;
 use crate::quik::TransactionInfo;
-use crate::quik::TRANSACTION_REPLY_SENDER;
 use crate::quik::ORDER_STATUS_SENDER;
 use crate::quik::TRADE_STATUS_SENDER;
+use crate::quik::TRANSACTION_REPLY_SENDER;
 use crate::signal::Signal;
 use chrono::{DateTime, Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
@@ -109,8 +109,10 @@ pub async fn trade(
     let long_number_of_candles: i32 = 21;
 
     // Инициализируем канал
-    let (transaction_sender, mut transaction_receiver): (UnboundedSender<TransactionInfo>, UnboundedReceiver<TransactionInfo>) =
-    mpsc::unbounded_channel();
+    let (transaction_sender, mut transaction_receiver): (
+        UnboundedSender<TransactionInfo>,
+        UnboundedReceiver<TransactionInfo>,
+    ) = mpsc::unbounded_channel();
 
     // Инициализируем TRANSACTION_REPLY_SENDER
     {
@@ -119,8 +121,10 @@ pub async fn trade(
     }
 
     // Инициализируем канал
-    let (order_sender, mut order_receiver): (UnboundedSender<OrderInfo>, UnboundedReceiver<OrderInfo>) =
-    mpsc::unbounded_channel();
+    let (order_sender, mut order_receiver): (
+        UnboundedSender<OrderInfo>,
+        UnboundedReceiver<OrderInfo>,
+    ) = mpsc::unbounded_channel();
 
     // Инициализируем ORDER_STATUS_SENDER
     {
@@ -129,8 +133,10 @@ pub async fn trade(
     }
 
     // Инициализируем канал
-    let (trade_sender, mut trade_receiver): (UnboundedSender<TradeInfo>, UnboundedReceiver<TradeInfo>) =
-        mpsc::unbounded_channel();
+    let (trade_sender, mut trade_receiver): (
+        UnboundedSender<TradeInfo>,
+        UnboundedReceiver<TradeInfo>,
+    ) = mpsc::unbounded_channel();
 
     // Инициализируем TRADE_SENDER
     {
@@ -200,7 +206,7 @@ pub async fn trade(
 
                     let operation = Operation::TransactionReply;
 
-                    let update_timestamp: DateTime<Utc> = Utc::now();
+                    let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
                     if let Err(e) = &database.insert_ema(&transaction_info.sec_code, short_ema, long_ema, transaction_info.price, operation, update_timestamp).await {
                         error!("insert into ema error: {}", e);
@@ -248,9 +254,7 @@ pub async fn trade(
                         IsSell::Sell => Operation::OrderSell,
                     };
 
-                    let naive_date_time = NaiveDateTime::new(order_info.date, order_info.time);
-
-                    let update_timestamp = naive_date_time.and_utc();
+                    let update_timestamp = NaiveDateTime::new(order_info.date, order_info.time);
 
                     if let Err(e) = &database.insert_ema(&order_info.sec_code, short_ema, long_ema, order_info.price, operation, update_timestamp).await {
                         error!("insert into ema error: {}", e);
@@ -301,9 +305,7 @@ pub async fn trade(
                         IsSell::Sell => Operation::TradeSell,
                     };
 
-                    let naive_date_time = NaiveDateTime::new(trade_info.date, trade_info.time);
-
-                    let update_timestamp = naive_date_time.and_utc();
+                    let update_timestamp = NaiveDateTime::new(trade_info.date, trade_info.time);
 
                     if let Err(e) = &database.insert_ema(&trade_info.sec_code, short_ema, long_ema, trade_info.price, operation, update_timestamp).await {
                         error!("insert into ema error: {}", e);
@@ -364,9 +366,9 @@ pub async fn trade(
                                 }
                             };
 
-                            let operation = Operation::None;
+                            let operation = Operation::NoneOperation;
 
-                            let update_timestamp: DateTime<Utc> = Utc::now();
+                            let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
                             if let Err(e) = &database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
                                 error!("insert into ema error: {}", e);
@@ -388,7 +390,7 @@ pub async fn trade(
                                             Signal::Sell => Operation::SignalSell,
                                         };
 
-                                        let update_timestamp: DateTime<Utc> = Utc::now();
+                                        let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
                                         if let Err(e) = database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
                                             error!("insert into ema error: {}", e);

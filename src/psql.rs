@@ -25,8 +25,8 @@ pub enum Operation {
     TradeBuy,
     #[postgres(name = "trade_sell")]
     TradeSell,
-    #[postgres(name = "none")]
-    None,
+    #[postgres(name = "none_operation")]
+    NoneOperation,
 }
 
 #[derive(Debug)]
@@ -191,68 +191,6 @@ impl Db {
         Ok(())
     }
 
-    /// Create type operation
-    pub async fn crate_type_operation(
-        &self,
-    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
-        // Get a connection from the pool
-        let conn = self.pool.get().await.map_err(|e| {
-            error!("error get a connection from the pool: {:?}", e);
-            e
-        })?;
-
-        let query = "
-            DO $$
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'operation') THEN
-                    CREATE TYPE operation AS ENUM (
-                        'transaction_reply',
-                        'signal_buy',
-                        'signal_sell',
-                        'order_buy',
-                        'order_sell',
-                        'trade_buy',
-                        'trade_sell',
-                        'none'
-                    );
-                END IF;
-            END;
-            $$;
-        ";
-
-        // Executing the command to create a type
-        conn.execute(query, &[]).await?;
-
-        Ok(())
-    }
-
-    /// Creating a table of EMA
-    pub async fn create_ema(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
-        // Get a connection from the pool
-        let conn = self.pool.get().await.map_err(|e| {
-            error!("error get a connection from the pool: {:?}", e);
-            e
-        })?;
-
-        // Create table
-        let query = "
-            CREATE TABLE IF NOT EXISTS ema (
-                id SERIAL PRIMARY KEY,
-                sec_code VARCHAR(12),
-                short_ema DOUBLE PRECISION,
-                long_ema DOUBLE PRECISION,
-                last_price DOUBLE PRECISION,
-                operation OPERATION,
-                update_timestamp TIMESTAMP DEFAULT NOW()
-            );
-        ";
-
-        // Executing the command to create a table
-        conn.execute(query, &[]).await?;
-
-        Ok(())
-    }
-
     /// Trigger function that will insert data into the historical_trades table
     pub async fn insert_into_historical(
         &self,
@@ -341,6 +279,127 @@ impl Db {
         Ok(())
     }
 
+    /// Create type operation
+    pub async fn create_type_operation(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        let query = "
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'operation') THEN
+                        CREATE TYPE operation AS ENUM (
+                            'transaction_reply',
+                            'signal_buy',
+                            'signal_sell',
+                            'order_buy',
+                            'order_sell',
+                            'trade_buy',
+                            'trade_sell',
+                            'none_operation'
+                        );
+                    END IF;
+                END;
+                $$;
+            ";
+
+        // Executing the command to create a type
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
+
+    /// Creating a table of EMA
+    pub async fn create_ema(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        // Create table
+        let query = "
+            CREATE TABLE IF NOT EXISTS ema (
+                id SERIAL PRIMARY KEY,
+                sec_code VARCHAR(12),
+                short_ema DOUBLE PRECISION,
+                long_ema DOUBLE PRECISION,
+                last_price DOUBLE PRECISION,
+                operation OPERATION,
+                update_timestamp TIMESTAMP DEFAULT NOW()
+            );
+        ";
+
+        // Executing the command to create a table
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
+
+    /// Create type signal
+    pub async fn create_type_signal(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        let query = "
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'signal') THEN
+                        CREATE TYPE signal AS ENUM (
+                            'buy',
+                            'sell'
+                        );
+                    END IF;
+                END;
+                $$;
+            ";
+
+        // Executing the command to create a type
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
+
+        /// Create type state
+        pub async fn create_type_state(
+            &self,
+        ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+            // Get a connection from the pool
+            let conn = self.pool.get().await.map_err(|e| {
+                error!("error get a connection from the pool: {:?}", e);
+                e
+            })?;
+    
+            let query = "
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'state') THEN
+                            CREATE TYPE state AS ENUM (
+                                'above',
+                                'below',
+                                'between'
+                            );
+                        END IF;
+                    END;
+                    $$;
+                ";
+    
+            // Executing the command to create a type
+            conn.execute(query, &[]).await?;
+    
+            Ok(())
+        }
+
     /// Initial database
     pub async fn init(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         if let Err(e) = self.set_transaction_isolation().await {
@@ -354,7 +413,15 @@ impl Db {
             error!("create table historical_trades error: {}", e);
         }
 
-        if let Err(e) = self.crate_type_operation().await {
+        if let Err(e) = self.insert_into_historical().await {
+            error!("create function insert_into_historical error: {}", e);
+        }
+
+        if let Err(e) = self.before_update_current_trades().await {
+            error!("create trigger before_update_current_trades error: {}", e);
+        }
+
+        if let Err(e) = self.create_type_operation().await {
             error!("create type operation error: {}", e);
         }
 
@@ -362,12 +429,12 @@ impl Db {
             error!("create table ema error: {}", e);
         }
 
-        if let Err(e) = self.insert_into_historical().await {
-            error!("create function insert_into_historical error: {}", e);
+        if let Err(e) = self.create_type_signal().await {
+            error!("create type signal error: {}", e);
         }
 
-        if let Err(e) = self.before_update_current_trades().await {
-            error!("create trigger before_update_current_trades error: {}", e);
+        if let Err(e) = self.create_type_state().await {
+            error!("create type signal error: {}", e);
         }
 
         Ok(())
@@ -675,15 +742,13 @@ impl Db {
         long_ema: f64,
         last_price: f64,
         operation: Operation,
-        update_timestamp: DateTime<Utc>,
+        update_timestamp: NaiveDateTime,
     ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
             error!("error get a connection from the pool: {:?}", e);
             e
         })?;
-
-        let update_timestamp = update_timestamp.to_rfc3339();
 
         let query = "
             INSERT INTO ema (sec_code, short_ema, long_ema, last_price, operation, update_timestamp)

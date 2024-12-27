@@ -1,9 +1,13 @@
 use tracing::info;
+use postgres_types::{FromSql, ToSql};
 
 /// Trading signal
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, ToSql, FromSql, PartialEq, Eq, Clone, Copy)]
+#[postgres(name = "signal")]
 pub enum Signal {
+    #[postgres(name = "buy")]
     Buy,
+    #[postgres(name = "sell")]
     Sell,
 }
 

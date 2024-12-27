@@ -126,23 +126,25 @@ impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut fetch_required = false;
 
-        egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-            let plot_sec_codes = self.plot_sec_codes.lock().unwrap();
-            let mut plot_sec_code = self.plot_sec_code.lock().unwrap(); // Lock the plot_sec_code for modification
+        egui::SidePanel::left("my_left_panel")
+            .resizable(false)
+            .show(ctx, |ui| {
+                let plot_sec_codes = self.plot_sec_codes.lock().unwrap();
+                let mut plot_sec_code = self.plot_sec_code.lock().unwrap(); // Lock the plot_sec_code for modification
 
-            egui::ComboBox::from_label("Select instrument")
-                .selected_text(&*plot_sec_code)
-                .show_ui(ui, |ui| {
-                    for code in plot_sec_codes.iter() {
-                        if ui
-                            .selectable_value(&mut *plot_sec_code, code.clone(), code)
-                            .clicked()
-                        {
-                            fetch_required = true;
+                egui::ComboBox::from_label("Select instrument")
+                    .selected_text(&*plot_sec_code)
+                    .show_ui(ui, |ui| {
+                        for code in plot_sec_codes.iter() {
+                            if ui
+                                .selectable_value(&mut *plot_sec_code, code.clone(), code)
+                                .clicked()
+                            {
+                                fetch_required = true;
+                            }
                         }
-                    }
-                });
-        });
+                    });
+            });
 
         if fetch_required {
             self.fetch_ema_data();

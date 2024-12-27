@@ -48,9 +48,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, info};
 
 lazy_static! {
-    pub static ref TRANSACTION_REPLY_SENDER: Mutex<Option<UnboundedSender<TransactionInfo>>> = Mutex::new(None);
-    pub static ref ORDER_STATUS_SENDER: Mutex<Option<UnboundedSender<OrderInfo>>> = Mutex::new(None);
-    pub static ref TRADE_STATUS_SENDER: Mutex<Option<UnboundedSender<TradeInfo>>> = Mutex::new(None);
+    pub static ref TRANSACTION_REPLY_SENDER: Mutex<Option<UnboundedSender<TransactionInfo>>> =
+        Mutex::new(None);
+    pub static ref ORDER_STATUS_SENDER: Mutex<Option<UnboundedSender<OrderInfo>>> =
+        Mutex::new(None);
+    pub static ref TRADE_STATUS_SENDER: Mutex<Option<UnboundedSender<TradeInfo>>> =
+        Mutex::new(None);
     static ref TERMINAL_INSTANCE: Mutex<Option<Arc<Mutex<Terminal>>>> = Mutex::new(None);
 }
 
@@ -248,7 +251,6 @@ pub enum Trans2QuikError {
     NulError(NulError),
 }
 
-
 impl fmt::Display for Trans2QuikError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -291,8 +293,7 @@ pub struct OrderInfo {
 
 impl OrderInfo {
     pub fn is_valid(&self) -> bool {
-        self.date != NaiveDate::default() &&
-        self.time != NaiveTime::default()
+        self.date != NaiveDate::default() && self.time != NaiveTime::default()
     }
 }
 
@@ -314,8 +315,7 @@ pub struct TradeInfo {
 
 impl TradeInfo {
     pub fn is_valid(&self) -> bool {
-        self.date != NaiveDate::default() &&
-        self.time != NaiveTime::default()
+        self.date != NaiveDate::default() && self.time != NaiveTime::default()
     }
 }
 
@@ -574,11 +574,13 @@ pub struct Terminal {
 
     /// Special function for the callback function transaction_reply_callback
     /// returns the code of the instrument for which the transaction was made.
-    trans2quik_transaction_reply_sec_code: unsafe extern "C" fn(trans_reply_descriptor: intptr_t) -> *mut c_char,
+    trans2quik_transaction_reply_sec_code:
+        unsafe extern "C" fn(trans_reply_descriptor: intptr_t) -> *mut c_char,
 
     /// Special function for the callback function transaction_reply_callback
     /// returns transaction price.
-    trans2quik_transaction_reply_price: unsafe extern "C" fn(trans_reply_descriptor: intptr_t) -> c_double,
+    trans2quik_transaction_reply_price:
+        unsafe extern "C" fn(trans_reply_descriptor: intptr_t) -> c_double,
 
     /// Special function for the callback function order_status_callback
     /// returns the date of the trade in the format: yyyymmdd
@@ -742,11 +744,17 @@ impl Terminal {
 
         // Special function for the callback function transaction_reply_callback
         // Returns the code of the instrument for which the transaction was made
-        let trans2quik_transaction_reply_sec_code = load_symbol::<unsafe extern "C" fn(intptr_t) -> *mut c_char>(&library, b"TRANS2QUIK_TRANSACTION_REPLY_SEC_CODE\0")?;
+        let trans2quik_transaction_reply_sec_code =
+            load_symbol::<unsafe extern "C" fn(intptr_t) -> *mut c_char>(
+                &library,
+                b"TRANS2QUIK_TRANSACTION_REPLY_SEC_CODE\0",
+            )?;
 
         // Special function for the callback function transaction_reply_callback
         // returns transaction price
-        let trans2quik_transaction_reply_price = load_symbol::<unsafe extern "C" fn(intptr_t) -> c_double>(&library, b"TRANS2QUIK_ORDER_DATE\0")?;
+        let trans2quik_transaction_reply_price = load_symbol::<
+            unsafe extern "C" fn(intptr_t) -> c_double,
+        >(&library, b"TRANS2QUIK_ORDER_DATE\0")?;
 
         // Special function for the callback function order_status_callback
         // returns the date of the trade in the format: yyyymmdd
@@ -1221,9 +1229,7 @@ fn decode_lpstr(code: *mut c_char) -> Result<String, DecodeLpstrError> {
     Ok(decoded_str.into_owned())
 }
 
-fn format_date(
-    date: i32
-) -> Result<NaiveDate, DateTimeError> {
+fn format_date(date: i32) -> Result<NaiveDate, DateTimeError> {
     if date <= 0 {
         return Err(DateTimeError::InvalidDate);
     }
@@ -1235,9 +1241,7 @@ fn format_date(
     Ok(naive_date)
 }
 
-fn format_time(
-    time: i32
-) -> Result<NaiveTime, DateTimeError> {
+fn format_time(time: i32) -> Result<NaiveTime, DateTimeError> {
     if time <= 0 {
         return Err(DateTimeError::InvalidTime);
     }
@@ -1294,7 +1298,7 @@ unsafe extern "C" fn transaction_reply_callback(
         let trans2quik_result = Trans2QuikResult::from(result_code);
 
         let trans_id = TransId::from(trans_id);
-        
+
         let reply_message = match decode_lpstr(reply_message) {
             Ok(reply_message) => reply_message,
             Err(e) => {
@@ -1316,9 +1320,9 @@ unsafe extern "C" fn transaction_reply_callback(
         };
 
         let price = (terminal.trans2quik_transaction_reply_price)(trans_reply_descriptor);
-    
+
         info!("TRANS2QUIK_TRANSACTION_REPLY_CALLBACK -> {:?}, error_code: {}, reply_code: {}, trans_id: {:?}, order_num: {}, reply_message: {}, sec_code: {}, price: {}", trans2quik_result, error_code, reply_code, trans_id, order_num, reply_message, sec_code, price);
-        
+
         if let Some(sender) = TRANSACTION_REPLY_SENDER.lock().unwrap().as_ref() {
             let transaction_info = TransactionInfo {
                 trans2quik_result,
