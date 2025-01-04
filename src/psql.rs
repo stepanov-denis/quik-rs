@@ -2,7 +2,7 @@
 use crate::signal::CrossoverSignal;
 use bb8::RunError;
 use bb8_postgres::{bb8::Pool, tokio_postgres::NoTls, PostgresConnectionManager};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use postgres_types::{FromSql, ToSql};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -36,7 +36,7 @@ pub struct Ema {
     pub long_ema: f64,
     pub last_price: f64,
     pub operation: Operation,
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: NaiveDateTime,
 }
 
 #[derive(Debug)]
@@ -804,7 +804,7 @@ impl Db {
             let long_ema = row.get("long_ema");
             let last_price = row.get("last_price");
             let operation = row.get("operation");
-            let timestamp: DateTime<Utc> = row.get("update_timestamp");
+            let timestamp: NaiveDateTime = row.get("update_timestamp");
 
             let ema_frame = Ema {
                 sec_code,

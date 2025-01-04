@@ -6,7 +6,8 @@ use crate::psql::Ema;
 use crate::psql::Instrument;
 use crate::psql::Operation;
 use bb8::RunError;
-use chrono::{DateTime, Utc};
+use chrono::NaiveDateTime;
+use chrono::DateTime;
 use eframe::egui;
 use egui::Color32;
 use egui_plot::GridMark;
@@ -170,53 +171,64 @@ impl eframe::App for MyApp {
                 let short_ema_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.short_ema]
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.short_ema]
                     })
                     .collect();
+
+                let short_ema_line = Line::new(short_ema_points)
+                    .color(Color32::RED)
+                    .name("Short EMA");
 
                 let long_ema_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.long_ema]
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.long_ema]
                     })
                     .collect();
+
+                let long_ema_line = Line::new(long_ema_points)
+                    .color(Color32::GREEN)
+                    .name("Long EMA");
 
                 let last_price_points: PlotPoints = ema
                     .iter()
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.last_price]
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
 
-                let short_line = Line::new(short_ema_points)
-                    .color(Color32::RED)
-                    .name("Short EMA");
-                let long_line = Line::new(long_ema_points)
-                    .color(Color32::GREEN)
-                    .name("Long EMA");
                 let last_price_line = Line::new(last_price_points)
                     .color(Color32::BLUE)
                     .name(sec_code);
+
+                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
+                let transaction_reply_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::TransactionReply)
+                    .map(|e| {
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
+
+                // Создаем объекты Points для операций
+                let transaction_reply_markers = Points::new(transaction_reply_points)
+                    .name("Transaction Reply")
+                    .color(Color32::ORANGE)
+                    .shape(MarkerShape::Asterisk) // Выбираем форму маркера
+                    .filled(true)
+                    .radius(5.0);
 
                 // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let signal_buy_points: PlotPoints = ema
                     .iter()
                     .filter(|e| e.operation == Operation::SignalBuy)
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let signal_sell_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::SignalSell)
-                    .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.last_price]
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
 
@@ -224,14 +236,57 @@ impl eframe::App for MyApp {
                 let signal_buy_markers = Points::new(signal_buy_points)
                     .name("Signal Buy")
                     .color(Color32::GREEN)
-                    .shape(MarkerShape::Up) // Выбираем форму маркера
+                    .shape(MarkerShape::Circle) // Выбираем форму маркера
                     .filled(true)
                     .radius(5.0);
+
+                let signal_sell_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::SignalSell)
+                    .map(|e| {
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
 
                 let signal_sell_markers = Points::new(signal_sell_points)
                     .name("Signal Sell")
                     .color(Color32::RED)
-                    .shape(MarkerShape::Down)
+                    .shape(MarkerShape::Circle)
+                    .filled(true)
+                    .radius(5.0);
+
+                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
+                let order_buy_points: PlotPoints = ema
+                .iter()
+                .filter(|e| e.operation == Operation::OrderBuy)
+                .map(|e| {
+                    let datetime: NaiveDateTime = e.timestamp;
+                    [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+                })
+                .collect();
+
+                // Создаем объекты Points для операций
+                let order_buy_markers = Points::new(order_buy_points)
+                    .name("Order Buy")
+                    .color(Color32::GREEN)
+                    .shape(MarkerShape::Cross) // Выбираем форму маркера
+                    .filled(true)
+                    .radius(5.0);
+
+                let order_sell_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::OrderSell)
+                    .map(|e| {
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
+
+                let order_sell_markers = Points::new(order_sell_points)
+                    .name("Order Sell")
+                    .color(Color32::RED)
+                    .shape(MarkerShape::Cross)
                     .filled(true)
                     .radius(5.0);
 
@@ -240,17 +295,8 @@ impl eframe::App for MyApp {
                     .iter()
                     .filter(|e| e.operation == Operation::TradeBuy)
                     .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let trade_sell_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::TradeSell)
-                    .map(|e| {
-                        let datetime: DateTime<Utc> = e.timestamp;
-                        [datetime.timestamp_millis() as f64, e.last_price]
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
                     })
                     .collect();
 
@@ -261,6 +307,15 @@ impl eframe::App for MyApp {
                     .shape(MarkerShape::Up) // Выбираем форму маркера
                     .filled(true)
                     .radius(5.0);
+
+                let trade_sell_points: PlotPoints = ema
+                    .iter()
+                    .filter(|e| e.operation == Operation::TradeSell)
+                    .map(|e| {
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
 
                 let trade_sell_markers = Points::new(trade_sell_points)
                     .name("Trade Sell")
@@ -287,11 +342,14 @@ impl eframe::App for MyApp {
                         )
                     })
                     .show(ui, |plot_ui| {
-                        plot_ui.line(short_line);
-                        plot_ui.line(long_line);
+                        plot_ui.line(short_ema_line);
+                        plot_ui.line(long_ema_line);
                         plot_ui.line(last_price_line);
+                        plot_ui.points(transaction_reply_markers);
                         plot_ui.points(signal_buy_markers);
                         plot_ui.points(signal_sell_markers);
+                        plot_ui.points(order_buy_markers);
+                        plot_ui.points(order_sell_markers);
                         plot_ui.points(trade_buy_markers);
                         plot_ui.points(trade_sell_markers);
                     });

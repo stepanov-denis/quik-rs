@@ -13,7 +13,7 @@ use crate::quik::ORDER_STATUS_SENDER;
 use crate::quik::TRADE_STATUS_SENDER;
 use crate::quik::TRANSACTION_REPLY_SENDER;
 use crate::signal::Signal;
-use chrono::{DateTime, Datelike, NaiveDateTime, Timelike, Utc, Weekday};
+use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
