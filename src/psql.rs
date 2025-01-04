@@ -785,9 +785,14 @@ impl Db {
 
         let query = "
             SELECT sec_code, short_ema, long_ema, last_price, operation, update_timestamp
-            FROM ema
-            WHERE sec_code = $1
-            ORDER BY update_timestamp DESC LIMIT 100000;
+            FROM (
+                SELECT sec_code, short_ema, long_ema, last_price, operation, update_timestamp
+                FROM ema
+                WHERE sec_code = $1
+                ORDER BY update_timestamp DESC 
+                LIMIT 100000
+            ) AS subquery
+            ORDER BY update_timestamp ASC;        
         ";
 
         // Executing
