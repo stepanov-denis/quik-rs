@@ -6,8 +6,8 @@ use crate::psql::Ema;
 use crate::psql::Instrument;
 use crate::psql::Operation;
 use bb8::RunError;
-use chrono::NaiveDateTime;
 use chrono::DateTime;
+use chrono::NaiveDateTime;
 use eframe::egui;
 use egui::Color32;
 use egui_plot::GridMark;
@@ -204,7 +204,6 @@ impl eframe::App for MyApp {
                     .color(Color32::BLUE)
                     .name(sec_code);
 
-                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let transaction_reply_points: PlotPoints = ema
                     .iter()
                     .filter(|e| e.operation == Operation::TransactionReply)
@@ -214,15 +213,13 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                // Создаем объекты Points для операций
                 let transaction_reply_markers = Points::new(transaction_reply_points)
                     .name("Transaction Reply")
                     .color(Color32::ORANGE)
-                    .shape(MarkerShape::Asterisk) // Выбираем форму маркера
+                    .shape(MarkerShape::Asterisk)
                     .filled(true)
                     .radius(5.0);
 
-                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let signal_buy_points: PlotPoints = ema
                     .iter()
                     .filter(|e| e.operation == Operation::SignalBuy)
@@ -232,11 +229,10 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                // Создаем объекты Points для операций
                 let signal_buy_markers = Points::new(signal_buy_points)
                     .name("Signal Buy")
                     .color(Color32::GREEN)
-                    .shape(MarkerShape::Circle) // Выбираем форму маркера
+                    .shape(MarkerShape::Circle)
                     .filled(true)
                     .radius(5.0);
 
@@ -256,21 +252,19 @@ impl eframe::App for MyApp {
                     .filled(true)
                     .radius(5.0);
 
-                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let order_buy_points: PlotPoints = ema
-                .iter()
-                .filter(|e| e.operation == Operation::OrderBuy)
-                .map(|e| {
-                    let datetime: NaiveDateTime = e.timestamp;
-                    [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                })
-                .collect();
+                    .iter()
+                    .filter(|e| e.operation == Operation::OrderBuy)
+                    .map(|e| {
+                        let datetime: NaiveDateTime = e.timestamp;
+                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+                    })
+                    .collect();
 
-                // Создаем объекты Points для операций
                 let order_buy_markers = Points::new(order_buy_points)
                     .name("Order Buy")
                     .color(Color32::GREEN)
-                    .shape(MarkerShape::Cross) // Выбираем форму маркера
+                    .shape(MarkerShape::Cross)
                     .filled(true)
                     .radius(5.0);
 
@@ -290,7 +284,6 @@ impl eframe::App for MyApp {
                     .filled(true)
                     .radius(5.0);
 
-                // Добавляем фильтрацию по операциям 'OrderBuy' и 'OrderSell'
                 let trade_buy_points: PlotPoints = ema
                     .iter()
                     .filter(|e| e.operation == Operation::TradeBuy)
@@ -300,11 +293,10 @@ impl eframe::App for MyApp {
                     })
                     .collect();
 
-                // Создаем объекты Points для операций
                 let trade_buy_markers = Points::new(trade_buy_points)
                     .name("Trade Buy")
                     .color(Color32::GREEN)
-                    .shape(MarkerShape::Up) // Выбираем форму маркера
+                    .shape(MarkerShape::Up)
                     .filled(true)
                     .radius(5.0);
 

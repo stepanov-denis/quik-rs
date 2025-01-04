@@ -1,5 +1,5 @@
-use tracing::info;
 use postgres_types::{FromSql, ToSql};
+use tracing::info;
 
 /// Trading signal
 #[derive(Debug, ToSql, FromSql, PartialEq, Eq, Clone, Copy)]

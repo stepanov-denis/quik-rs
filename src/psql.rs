@@ -25,8 +25,8 @@ pub enum Operation {
     TradeBuy,
     #[postgres(name = "trade_sell")]
     TradeSell,
-    #[postgres(name = "none_operation")]
-    NoneOperation,
+    #[postgres(name = "is_none")]
+    IsNone,
 }
 
 #[derive(Debug)]
@@ -301,7 +301,7 @@ impl Db {
                             'order_sell',
                             'trade_buy',
                             'trade_sell',
-                            'none_operation'
+                            'is_none'
                         );
                     END IF;
                 END;
@@ -370,17 +370,17 @@ impl Db {
         Ok(())
     }
 
-        /// Create type state
-        pub async fn create_type_state(
-            &self,
-        ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
-            // Get a connection from the pool
-            let conn = self.pool.get().await.map_err(|e| {
-                error!("error get a connection from the pool: {:?}", e);
-                e
-            })?;
-    
-            let query = "
+    /// Create type state
+    pub async fn create_type_state(
+        &self,
+    ) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {
+        // Get a connection from the pool
+        let conn = self.pool.get().await.map_err(|e| {
+            error!("error get a connection from the pool: {:?}", e);
+            e
+        })?;
+
+        let query = "
                     DO $$
                     BEGIN
                         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'state') THEN
@@ -393,12 +393,12 @@ impl Db {
                     END;
                     $$;
                 ";
-    
-            // Executing the command to create a type
-            conn.execute(query, &[]).await?;
-    
-            Ok(())
-        }
+
+        // Executing the command to create a type
+        conn.execute(query, &[]).await?;
+
+        Ok(())
+    }
 
     /// Initial database
     pub async fn init(&self) -> Result<(), RunError<bb8_postgres::tokio_postgres::Error>> {

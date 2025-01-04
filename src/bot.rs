@@ -366,7 +366,7 @@ pub async fn trade(
                                 }
                             };
 
-                            let operation = Operation::NoneOperation;
+                            let operation = Operation::IsNone;
 
                             let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
