@@ -545,7 +545,7 @@ impl Db {
             SELECT
                 $1::INT AS timeframe_min,   -- Timeframe in minutes
                 $2::INT AS num_candles,     -- Number of candles to retrieve
-                $3::TEXT AS sec_code        -- Security code
+                $3::TEXT AS sec_code        -- SEC code
             ),
             -- Determine the current time in UTC+3
             current_ts AS (
@@ -569,7 +569,7 @@ impl Db {
                 SELECT
                     generate_series(
                     -- Start from an earlier candle to account for excluded candles
-                    (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 24 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
+                    (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 50 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
                     -- End at the last fully completed candle
                     (SELECT ts FROM last_candle_start_ts),
                     -- Increment by the timeframe
@@ -579,7 +579,7 @@ impl Db {
             WHERE
                 -- Exclude candles during non-trading hours (updated schedule)
                 NOT (
-                ct.candle_start::time >= TIME '02:00:00' AND ct.candle_start::time < TIME '04:00:00'
+                ct.candle_start::time > TIME '18:39:59' AND ct.candle_start::time < TIME '10:00:00'
                 )
             ),
             candles AS (
