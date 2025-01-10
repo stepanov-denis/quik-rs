@@ -31,7 +31,7 @@ fn transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static s
         return Err("OPERATION cannot be empty");
     }
 
-    let template = "ACCOUNT=NL0011100043; CLIENT_CODE=10677; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=; QUANTITY=1;";
+    let template = "ACCOUNT=NL0011100043; CLIENT_CODE=10123; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=; QUANTITY=1;";
     let replaced_sec_code = template.replace("SECCODE=", &format!("SECCODE={};", sec_code));
     let transaction = replaced_sec_code.replace("OPERATION=", &format!("OPERATION={};", operation));
 
@@ -56,13 +56,13 @@ fn is_weekday(weekday: Weekday) -> bool {
 }
 
 /// Checks whether the current time is after the start of trading (01:05).
-fn is_after_start_time(hour: u32, minute: u32) -> bool {
-    hour > 1 || (hour == 1 && minute >= 5)
+fn is_after_start_time(hour: u32) -> bool {
+    hour > 6
 }
 
 /// Checks whether the current time is until the end of trading (23:00).
-fn is_before_end_time(hour: u32) -> bool {
-    hour < 23
+fn is_before_end_time(hour: u32, minute: u32) -> bool {
+    hour < 18 || (hour == 18 && minute < 40)
 }
 
 /// Checks whether the specified time corresponds to the trading schedule.
@@ -74,8 +74,8 @@ fn is_before_end_time(hour: u32) -> bool {
 fn is_trading_time() -> bool {
     let now = Utc::now();
     is_weekday(now.weekday())
-        && is_after_start_time(now.hour(), now.minute())
-        && is_before_end_time(now.hour())
+        && is_after_start_time(now.hour())
+        && is_before_end_time(now.hour(), now.minute())
 }
 
 pub async fn trade(
