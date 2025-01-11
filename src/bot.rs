@@ -31,7 +31,7 @@ fn transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static s
         return Err("OPERATION cannot be empty");
     }
 
-    let template = "ACCOUNT=NL0011100043; CLIENT_CODE=10123; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=; QUANTITY=1;";
+    let template = "ACCOUNT=NL0011100043; CLIENT_CODE=10526; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=; QUANTITY=1;";
     let replaced_sec_code = template.replace("SECCODE=", &format!("SECCODE={};", sec_code));
     let transaction = replaced_sec_code.replace("OPERATION=", &format!("OPERATION={};", operation));
 
