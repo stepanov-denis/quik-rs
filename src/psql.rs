@@ -512,8 +512,8 @@ impl Db {
                 last_price_time
             );
 
-            let hysteresis_percentage = 2.0; // %
-            let hysteresis_periods = 5; // periods
+            let hysteresis_percentage = 1.0; // %
+            let hysteresis_periods = 1; // periods
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
             let instrument = Instrument {

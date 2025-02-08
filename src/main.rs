@@ -15,6 +15,7 @@ mod ema;
 mod psql;
 mod quik;
 mod signal;
+mod tg;
 
 #[tokio::main]
 async fn main() -> eframe::Result<(), Box<dyn Error>> {

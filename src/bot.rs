@@ -13,6 +13,7 @@ use crate::quik::ORDER_STATUS_SENDER;
 use crate::quik::TRADE_STATUS_SENDER;
 use crate::quik::TRANSACTION_REPLY_SENDER;
 use crate::signal::Signal;
+use crate::tg::TgBot;
 use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
@@ -83,6 +84,10 @@ pub async fn trade(
     database: Arc<Db>,
     instruments: Arc<RwLock<Vec<Instrument>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Создание нового экземпляра TgBot
+    let tg_bot = TgBot::new("8095625328:AAFsszchpufFt3bR-KnVVuAYKMcwXgWB5yA");
+    tg_bot.start_message_listener().await;
+
     // Preparing to work with QUIK
     let path = r"c:\QUIK Junior\trans2quik.dll";
     let class_code = "";
@@ -168,152 +173,152 @@ pub async fn trade(
                     }
                 }
             },
-            Some(transaction_info) = transaction_receiver.recv() => {
-                info!("transaction_reply_callback received: {:?}", transaction_info);
-                    // Calculate the short EMA
-                    let short_ema = match ema::Ema::calc(
-                        &database,
-                        &transaction_info.sec_code,
-                        timeframe,
-                        short_number_of_candles,
-                    ).await {
-                        Ok(short_ema) => {
-                            info!("short_ema: {}", short_ema);
-                            short_ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
+            // Some(transaction_info) = transaction_receiver.recv() => {
+            //     info!("transaction_reply_callback received: {:?}", transaction_info);
+            //         // Calculate the short EMA
+            //         let short_ema = match ema::Ema::calc(
+            //             &database,
+            //             &transaction_info.sec_code,
+            //             timeframe,
+            //             short_number_of_candles,
+            //         ).await {
+            //             Ok(short_ema) => {
+            //                 info!("short_ema: {}", short_ema);
+            //                 short_ema
+            //             }
+            //             Err(e) => {
+            //                 error!("{}", e);
+            //                 continue;
+            //             }
+            //         };
 
-                    // Calculate the long EMA
-                    let long_ema = match ema::Ema::calc(
-                        &database,
-                        &transaction_info.sec_code,
-                        timeframe,
-                        long_number_of_candles,
-                    ).await {
-                        Ok(long_ema) => {
-                            info!("long_ema: {}", long_ema);
-                            long_ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
+            //         // Calculate the long EMA
+            //         let long_ema = match ema::Ema::calc(
+            //             &database,
+            //             &transaction_info.sec_code,
+            //             timeframe,
+            //             long_number_of_candles,
+            //         ).await {
+            //             Ok(long_ema) => {
+            //                 info!("long_ema: {}", long_ema);
+            //                 long_ema
+            //             }
+            //             Err(e) => {
+            //                 error!("{}", e);
+            //                 continue;
+            //             }
+            //         };
 
-                    let operation = Operation::TransactionReply;
+            //         let operation = Operation::TransactionReply;
 
-                    let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
+            //         let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
-                    if let Err(e) = &database.insert_ema(&transaction_info.sec_code, short_ema, long_ema, transaction_info.price, operation, update_timestamp).await {
-                        error!("insert into ema error: {}", e);
-                    }
-            },
-            Some(order_info) = order_receiver.recv() => {
-                info!("order_status_callback received: {:?}", order_info);
-                if order_info.is_valid() {
-                    // Calculate the short EMA
-                    let short_ema = match ema::Ema::calc(
-                        &database,
-                        &order_info.sec_code,
-                        timeframe,
-                        short_number_of_candles,
-                    ).await {
-                        Ok(short_ema) => {
-                            info!("short_ema: {}", short_ema);
-                            short_ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
+            //         if let Err(e) = &database.insert_ema(&transaction_info.sec_code, short_ema, long_ema, transaction_info.price, operation, update_timestamp).await {
+            //             error!("insert into ema error: {}", e);
+            //         }
+            // },
+            // Some(order_info) = order_receiver.recv() => {
+            //     info!("order_status_callback received: {:?}", order_info);
+            //     if order_info.is_valid() {
+            //         // Calculate the short EMA
+            //         let short_ema = match ema::Ema::calc(
+            //             &database,
+            //             &order_info.sec_code,
+            //             timeframe,
+            //             short_number_of_candles,
+            //         ).await {
+            //             Ok(short_ema) => {
+            //                 info!("short_ema: {}", short_ema);
+            //                 short_ema
+            //             }
+            //             Err(e) => {
+            //                 error!("{}", e);
+            //                 continue;
+            //             }
+            //         };
 
-                    // Calculate the long EMA
-                    let long_ema = match ema::Ema::calc(
-                        &database,
-                        &order_info.sec_code,
-                        timeframe,
-                        long_number_of_candles,
-                    ).await {
-                        Ok(long_ema) => {
-                            info!("long_ema: {}", long_ema);
-                            long_ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
+            //         // Calculate the long EMA
+            //         let long_ema = match ema::Ema::calc(
+            //             &database,
+            //             &order_info.sec_code,
+            //             timeframe,
+            //             long_number_of_candles,
+            //         ).await {
+            //             Ok(long_ema) => {
+            //                 info!("long_ema: {}", long_ema);
+            //                 long_ema
+            //             }
+            //             Err(e) => {
+            //                 error!("{}", e);
+            //                 continue;
+            //             }
+            //         };
 
-                    let operation = match order_info.is_sell {
-                        IsSell::Buy => Operation::OrderBuy,
-                        IsSell::Sell => Operation::OrderSell,
-                    };
+            //         let operation = match order_info.is_sell {
+            //             IsSell::Buy => Operation::OrderBuy,
+            //             IsSell::Sell => Operation::OrderSell,
+            //         };
 
-                    let update_timestamp = NaiveDateTime::new(order_info.date, order_info.time);
+            //         let update_timestamp = NaiveDateTime::new(order_info.date, order_info.time);
 
-                    if let Err(e) = &database.insert_ema(&order_info.sec_code, short_ema, long_ema, order_info.price, operation, update_timestamp).await {
-                        error!("insert into ema error: {}", e);
-                    }
-                } else {
-                    error!("order_info invalid");
-                }
-            },
-            Some(trade_info) = trade_receiver.recv() => {
-                info!("trade_status_callback received: {:?}", trade_info);
-                if trade_info.is_valid() {
-                    // Calculate the short EMA
-                    let short_ema = match ema::Ema::calc(
-                        &database,
-                        &trade_info.sec_code,
-                        timeframe,
-                        short_number_of_candles,
-                    ).await {
-                        Ok(short_ema) => {
-                            info!("short_ema: {}", short_ema);
-                            short_ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
+            //         if let Err(e) = &database.insert_ema(&order_info.sec_code, short_ema, long_ema, order_info.price, operation, update_timestamp).await {
+            //             error!("insert into ema error: {}", e);
+            //         }
+            //     } else {
+            //         error!("order_info invalid");
+            //     }
+            // },
+            // Some(trade_info) = trade_receiver.recv() => {
+            //     info!("trade_status_callback received: {:?}", trade_info);
+            //     if trade_info.is_valid() {
+            //         // Calculate the short EMA
+            //         let short_ema = match ema::Ema::calc(
+            //             &database,
+            //             &trade_info.sec_code,
+            //             timeframe,
+            //             short_number_of_candles,
+            //         ).await {
+            //             Ok(short_ema) => {
+            //                 info!("short_ema: {}", short_ema);
+            //                 short_ema
+            //             }
+            //             Err(e) => {
+            //                 error!("{}", e);
+            //                 continue;
+            //             }
+            //         };
 
-                    // Calculate the long EMA
-                    let long_ema = match ema::Ema::calc(
-                        &database,
-                        &trade_info.sec_code,
-                        timeframe,
-                        long_number_of_candles,
-                    ).await {
-                        Ok(long_ema) => {
-                            info!("long_ema: {}", long_ema);
-                            long_ema
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                            continue;
-                        }
-                    };
+            //         // Calculate the long EMA
+            //         let long_ema = match ema::Ema::calc(
+            //             &database,
+            //             &trade_info.sec_code,
+            //             timeframe,
+            //             long_number_of_candles,
+            //         ).await {
+            //             Ok(long_ema) => {
+            //                 info!("long_ema: {}", long_ema);
+            //                 long_ema
+            //             }
+            //             Err(e) => {
+            //                 error!("{}", e);
+            //                 continue;
+            //             }
+            //         };
 
-                    let operation = match trade_info.is_sell {
-                        IsSell::Buy => Operation::TradeBuy,
-                        IsSell::Sell => Operation::TradeSell,
-                    };
+            //         let operation = match trade_info.is_sell {
+            //             IsSell::Buy => Operation::TradeBuy,
+            //             IsSell::Sell => Operation::TradeSell,
+            //         };
 
-                    let update_timestamp = NaiveDateTime::new(trade_info.date, trade_info.time);
+            //         let update_timestamp = NaiveDateTime::new(trade_info.date, trade_info.time);
 
-                    if let Err(e) = &database.insert_ema(&trade_info.sec_code, short_ema, long_ema, trade_info.price, operation, update_timestamp).await {
-                        error!("insert into ema error: {}", e);
-                    }
-                } else {
-                    error!("trade_info invalid");
-                }
-            },
+            //         if let Err(e) = &database.insert_ema(&trade_info.sec_code, short_ema, long_ema, trade_info.price, operation, update_timestamp).await {
+            //             error!("insert into ema error: {}", e);
+            //         }
+            //     } else {
+            //         error!("trade_info invalid");
+            //     }
+            // },
             result = async {
                 if is_trading_time() {
                     let mut instruments = instruments.write().await;
@@ -395,6 +400,10 @@ pub async fn trade(
                                         if let Err(e) = database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
                                             error!("insert into ema error: {}", e);
                                         }
+
+                                        // Отправка сообщения всем подписчикам
+                                        let message = format!("Торговый сигнал для {}: {:?}", instrument.sec_code, signal);
+                                        tg_bot.broadcast(&message).await;
                                     }
                                     Err(e) => error!("create transaction_str error: {}", e),
                                 }
@@ -405,8 +414,8 @@ pub async fn trade(
                 }
 
                 // Pause before the next iteration
-                info!("sleep 60 seconds");
-                sleep(Duration::from_secs(60)).await;
+                info!("sleep 300 seconds");
+                sleep(Duration::from_secs(300)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {
