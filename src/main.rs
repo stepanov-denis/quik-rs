@@ -27,7 +27,7 @@ async fn main() -> eframe::Result<(), Box<dyn Error>> {
     let database = Arc::new(psql::Db::new(connection_str).await?);
     database.init().await?;
 
-    let class_code = "QJSIM";
+    let class_code = "TQBR";
     let instrument_status = "торгуется";
     let instruments = Arc::new(RwLock::new(
         database

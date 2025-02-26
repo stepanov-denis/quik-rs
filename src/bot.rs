@@ -62,8 +62,8 @@ fn is_after_start_time(hour: u32) -> bool {
 }
 
 /// Checks whether the current time is until the end of trading (23:00).
-fn is_before_end_time(hour: u32, minute: u32) -> bool {
-    hour < 18 || (hour == 18 && minute < 40)
+fn is_before_end_time(hour: u32) -> bool {
+    hour < 16
 }
 
 /// Checks whether the specified time corresponds to the trading schedule.
@@ -76,7 +76,7 @@ fn is_trading_time() -> bool {
     let now = Utc::now();
     is_weekday(now.weekday())
         && is_after_start_time(now.hour())
-        && is_before_end_time(now.hour(), now.minute())
+        && is_before_end_time(now.hour())
 }
 
 pub async fn trade(
@@ -89,24 +89,24 @@ pub async fn trade(
     tg_bot.start_message_listener().await;
 
     // Preparing to work with QUIK
-    let path = r"c:\QUIK Junior\trans2quik.dll";
-    let class_code = "";
-    let sec_code = "";
+    // let path = r"C:\QUIK_SBER\trans2quik.dll";
+    // let class_code = "";
+    // let sec_code = "";
 
-    let terminal = Terminal::new(path)?;
-    let terminal = Arc::new(Mutex::new(terminal));
-    {
-        let terminal_guard = terminal.lock().await;
-        terminal_guard.connect()?;
-        terminal_guard.is_dll_connected()?;
-        terminal_guard.is_quik_connected()?;
-        terminal_guard.set_connection_status_callback()?;
-        terminal_guard.set_transactions_reply_callback()?;
-        terminal_guard.subscribe_orders(class_code, sec_code)?;
-        terminal_guard.subscribe_trades(class_code, sec_code)?;
-        terminal_guard.start_orders();
-        terminal_guard.start_trades();
-    }
+    // let terminal = Terminal::new(path)?;
+    // let terminal = Arc::new(Mutex::new(terminal));
+    // {
+    //     let terminal_guard = terminal.lock().await;
+    //     terminal_guard.connect()?;
+    //     terminal_guard.is_dll_connected()?;
+    //     terminal_guard.is_quik_connected()?;
+    //     terminal_guard.set_connection_status_callback()?;
+    //     terminal_guard.set_transactions_reply_callback()?;
+    //     terminal_guard.subscribe_orders(class_code, sec_code)?;
+    //     terminal_guard.subscribe_trades(class_code, sec_code)?;
+    //     terminal_guard.start_orders();
+    //     terminal_guard.start_trades();
+    // }
 
     // Preparing for trading
     let timeframe: i32 = 30;
@@ -156,17 +156,17 @@ pub async fn trade(
                     AppCommand::Shutdown => {
                         info!("shutdown signal");
                         // Access to terminal via Mutex
-                        let terminal_guard = terminal.lock().await;
+                        // let terminal_guard = terminal.lock().await;
 
-                        if let Err(err) = terminal_guard.unsubscribe_orders() {
-                            error!("error unsubscribing from orders: {}", err);
-                        }
-                        if let Err(err) = terminal_guard.unsubscribe_trades() {
-                            error!("error unsubscribing from trades: {}", err);
-                        }
-                        if let Err(err) = terminal_guard.disconnect() {
-                            error!("error disconnecting: {}", err);
-                        }
+                        // if let Err(err) = terminal_guard.unsubscribe_orders() {
+                        //     error!("error unsubscribing from orders: {}", err);
+                        // }
+                        // if let Err(err) = terminal_guard.unsubscribe_trades() {
+                        //     error!("error unsubscribing from trades: {}", err);
+                        // }
+                        // if let Err(err) = terminal_guard.disconnect() {
+                        //     error!("error disconnecting: {}", err);
+                        // }
 
                         info!("shutdown sequence completed");
                         break;
@@ -324,7 +324,7 @@ pub async fn trade(
                     let mut instruments = instruments.write().await;
                     for instrument in instruments.iter_mut() {
                             // Get access to the terminal
-                            let terminal_guard = terminal.lock().await;
+                            // let terminal_guard = terminal.lock().await;
 
                             // Calculate the short EMA
                             let short_ema = match ema::Ema::calc(
@@ -387,26 +387,41 @@ pub async fn trade(
                                 };
                                 info!("{} => {:?}", instrument.sec_code, signal);
 
-                                match transaction_str(&instrument.sec_code, operation) {
-                                    Ok(transaction_str) => {
-                                        process_transaction(terminal_guard, &transaction_str);
-                                        let operation = match signal {
-                                            Signal::Buy => Operation::SignalBuy,
-                                            Signal::Sell => Operation::SignalSell,
-                                        };
+                                // match transaction_str(&instrument.sec_code, operation) {
+                                //     Ok(transaction_str) => {
+                                //         process_transaction(terminal_guard, &transaction_str);
+                                //         let operation = match signal {
+                                //             Signal::Buy => Operation::SignalBuy,
+                                //             Signal::Sell => Operation::SignalSell,
+                                //         };
 
-                                        let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
+                                //         let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
-                                        if let Err(e) = database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
-                                            error!("insert into ema error: {}", e);
-                                        }
+                                //         if let Err(e) = database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
+                                //             error!("insert into ema error: {}", e);
+                                //         }
 
-                                        // Отправка сообщения всем подписчикам
-                                        let message = format!("Торговый сигнал для {}: {:?}", instrument.sec_code, signal);
-                                        tg_bot.broadcast(&message).await;
-                                    }
-                                    Err(e) => error!("create transaction_str error: {}", e),
+                                //         // Отправка сообщения всем подписчикам
+                                //         let message = format!("Торговый сигнал для {}: {:?}, цена: {}", instrument.sec_code, signal, last_price);
+                                //         tg_bot.broadcast(&message).await;
+                                //     }
+                                //     Err(e) => error!("create transaction_str error: {}", e),
+                                // }
+
+                                let operation = match signal {
+                                    Signal::Buy => Operation::SignalBuy,
+                                    Signal::Sell => Operation::SignalSell,
+                                };
+
+                                let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
+
+                                if let Err(e) = database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
+                                    error!("insert into ema error: {}", e);
                                 }
+
+                                // Отправка сообщения всем подписчикам
+                                let message = format!("Торговый сигнал для {}: {:?}, цена: {}", instrument.sec_code, signal, last_price);
+                                tg_bot.broadcast(&message).await;
                             }
                     }
                 } else {

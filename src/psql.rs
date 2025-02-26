@@ -579,7 +579,7 @@ impl Db {
             WHERE
                 -- Exclude candles during non-trading hours (updated schedule)
                 NOT (
-                ct.candle_start::time > TIME '18:39:59' AND ct.candle_start::time < TIME '10:00:00'
+                ct.candle_start::time < TIME '10:00:00' OR ct.candle_start::time > TIME '18:39:59'
                 )
             ),
             candles AS (
