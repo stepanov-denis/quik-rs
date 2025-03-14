@@ -493,6 +493,8 @@ impl From<chrono::ParseError> for DateTimeError {
 /// }
 /// ```
 pub struct Terminal {
+    path_to_quik: String,
+
     /// Loading a dynamic library Trans2QUIK.dll, which provides an API for interacting with QUIK.
     library: Arc<Library>,
 
@@ -602,6 +604,7 @@ pub struct Terminal {
 impl Clone for Terminal {
     fn clone(&self) -> Self {
         Terminal {
+            path_to_quik: self.path_to_quik.clone(),
             library: Arc::clone(&self.library),
             trans2quik_connect: self.trans2quik_connect,
             trans2quik_disconnect: self.trans2quik_disconnect,
@@ -632,6 +635,8 @@ impl Clone for Terminal {
 impl Terminal {
     /// The function is used to load the library Trans2QUIK.dll.
     pub fn new(path: &str) -> Result<Self, Trans2QuikError> {
+        let path_to_quik = path.to_string();
+
         // Loading a dynamic library Trans2QUIK.dll, which provides an API for interacting with QUIK.
         let library = unsafe { Library::new(path)? };
 
@@ -785,6 +790,7 @@ impl Terminal {
         )?;
 
         Ok(Terminal {
+            path_to_quik,
             library: library.into(),
             trans2quik_connect,
             trans2quik_disconnect,
@@ -850,7 +856,7 @@ impl Terminal {
 
     /// The function is used to establish communication with the QUIK terminal.
     pub fn connect(&self) -> Result<Trans2QuikResult, Trans2QuikError> {
-        let connection_str = CString::new(r"c:\QUIK Junior")?;
+        let connection_str = CString::new(&*self.path_to_quik)?;
         let connection_str_ptr = connection_str.as_ptr() as *mut c_char;
 
         let function = |error_code_ptr: *mut c_long,

@@ -125,228 +125,232 @@ impl eframe::App for MyApp {
     /// * ctx - The egui context used for drawing the user interface.
     /// * _frame - The current frame, used for various frame operations.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut fetch_required = false;
+        // let mut fetch_required = false;
 
-        egui::SidePanel::left("my_left_panel")
-            .resizable(false)
-            .show(ctx, |ui| {
-                let plot_sec_codes = self.plot_sec_codes.lock().unwrap();
-                let mut plot_sec_code = self.plot_sec_code.lock().unwrap(); // Lock the plot_sec_code for modification
+        // egui::SidePanel::left("my_left_panel")
+        //     .resizable(false)
+        //     .show(ctx, |ui| {
+        //         let plot_sec_codes = self.plot_sec_codes.lock().unwrap();
+        //         let mut plot_sec_code = self.plot_sec_code.lock().unwrap(); // Lock the plot_sec_code for modification
 
-                egui::ComboBox::from_label("Select instrument")
-                    .selected_text(&*plot_sec_code)
-                    .show_ui(ui, |ui| {
-                        for code in plot_sec_codes.iter() {
-                            if ui
-                                .selectable_value(&mut *plot_sec_code, code.clone(), code)
-                                .clicked()
-                            {
-                                fetch_required = true;
-                            }
-                        }
-                    });
-            });
+        //         egui::ComboBox::from_label("Select instrument")
+        //             .selected_text(&*plot_sec_code)
+        //             .show_ui(ui, |ui| {
+        //                 for code in plot_sec_codes.iter() {
+        //                     if ui
+        //                         .selectable_value(&mut *plot_sec_code, code.clone(), code)
+        //                         .clicked()
+        //                     {
+        //                         fetch_required = true;
+        //                     }
+        //                 }
+        //             });
+        //     });
 
-        if fetch_required {
-            self.fetch_ema_data();
-        }
+        // if fetch_required {
+        //     self.fetch_ema_data();
+        // }
 
-        // Display the central panel with a heading.
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Make some money");
-
-            // Trigger data fetching if not yet fetched
-            if self.ema_data.lock().unwrap().is_none() {
-                self.fetch_ema_data();
-            }
-
-            // Render the EMA plot if data is available
-            if let Some(Ok(ema)) = &*self.ema_data.lock().unwrap() {
-                let sec_code = if let Some(first_ema) = ema.first() {
-                    &first_ema.sec_code
-                } else {
-                    "Unknown"
-                };
-
-                let short_ema_points: PlotPoints = ema
-                    .iter()
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.short_ema]
-                    })
-                    .collect();
-
-                let short_ema_line = Line::new(short_ema_points)
-                    .color(Color32::RED)
-                    .name("Short EMA");
-
-                let long_ema_points: PlotPoints = ema
-                    .iter()
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.long_ema]
-                    })
-                    .collect();
-
-                let long_ema_line = Line::new(long_ema_points)
-                    .color(Color32::GREEN)
-                    .name("Long EMA");
-
-                let last_price_points: PlotPoints = ema
-                    .iter()
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let last_price_line = Line::new(last_price_points)
-                    .color(Color32::BLUE)
-                    .name(sec_code);
-
-                let transaction_reply_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::TransactionReply)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let transaction_reply_markers = Points::new(transaction_reply_points)
-                    .name("Transaction Reply")
-                    .color(Color32::ORANGE)
-                    .shape(MarkerShape::Asterisk)
-                    .filled(true)
-                    .radius(5.0);
-
-                let signal_buy_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::SignalBuy)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let signal_buy_markers = Points::new(signal_buy_points)
-                    .name("Signal Buy")
-                    .color(Color32::GREEN)
-                    .shape(MarkerShape::Circle)
-                    .filled(true)
-                    .radius(5.0);
-
-                let signal_sell_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::SignalSell)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let signal_sell_markers = Points::new(signal_sell_points)
-                    .name("Signal Sell")
-                    .color(Color32::RED)
-                    .shape(MarkerShape::Circle)
-                    .filled(true)
-                    .radius(5.0);
-
-                let order_buy_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::OrderBuy)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let order_buy_markers = Points::new(order_buy_points)
-                    .name("Order Buy")
-                    .color(Color32::GREEN)
-                    .shape(MarkerShape::Cross)
-                    .filled(true)
-                    .radius(5.0);
-
-                let order_sell_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::OrderSell)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let order_sell_markers = Points::new(order_sell_points)
-                    .name("Order Sell")
-                    .color(Color32::RED)
-                    .shape(MarkerShape::Cross)
-                    .filled(true)
-                    .radius(5.0);
-
-                let trade_buy_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::TradeBuy)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let trade_buy_markers = Points::new(trade_buy_points)
-                    .name("Trade Buy")
-                    .color(Color32::GREEN)
-                    .shape(MarkerShape::Up)
-                    .filled(true)
-                    .radius(5.0);
-
-                let trade_sell_points: PlotPoints = ema
-                    .iter()
-                    .filter(|e| e.operation == Operation::TradeSell)
-                    .map(|e| {
-                        let datetime: NaiveDateTime = e.timestamp;
-                        [datetime.and_utc().timestamp_millis() as f64, e.last_price]
-                    })
-                    .collect();
-
-                let trade_sell_markers = Points::new(trade_sell_points)
-                    .name("Trade Sell")
-                    .color(Color32::RED)
-                    .shape(MarkerShape::Down)
-                    .filled(true)
-                    .radius(5.0);
-
-                Plot::new("EMA Plot")
-                    .view_aspect(2.0)
-                    .x_axis_formatter(|mark: GridMark, _range: &std::ops::RangeInclusive<f64>| {
-                        let datetime = DateTime::from_timestamp_millis(mark.value as i64)
-                            .expect("Invalid timestamp");
-                        datetime.format("%Y-%m-%d %H:%M:%S").to_string()
-                    })
-                    .label_formatter(|name, value| {
-                        let datetime = DateTime::from_timestamp_millis(value.x as i64)
-                            .expect("Invalid timestamp");
-                        format!(
-                            "{}\n{:.4}\n{}",
-                            name,
-                            value.y,
-                            datetime.format("%Y-%m-%d %H:%M:%S")
-                        )
-                    })
-                    .show(ui, |plot_ui| {
-                        plot_ui.line(short_ema_line);
-                        plot_ui.line(long_ema_line);
-                        plot_ui.line(last_price_line);
-                        plot_ui.points(transaction_reply_markers);
-                        plot_ui.points(signal_buy_markers);
-                        plot_ui.points(signal_sell_markers);
-                        plot_ui.points(order_buy_markers);
-                        plot_ui.points(order_sell_markers);
-                        plot_ui.points(trade_buy_markers);
-                        plot_ui.points(trade_sell_markers);
-                    });
-            }
         });
+
+        // Display the central panel with a heading.
+        // egui::CentralPanel::default().show(ctx, |ui| {
+        //     ui.heading("Make some money");
+
+        //     // Trigger data fetching if not yet fetched
+        //     if self.ema_data.lock().unwrap().is_none() {
+        //         self.fetch_ema_data();
+        //     }
+
+        //     // Render the EMA plot if data is available
+        //     if let Some(Ok(ema)) = &*self.ema_data.lock().unwrap() {
+        //         let sec_code = if let Some(first_ema) = ema.first() {
+        //             &first_ema.sec_code
+        //         } else {
+        //             "Unknown"
+        //         };
+
+        //         let short_ema_points: PlotPoints = ema
+        //             .iter()
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.short_ema]
+        //             })
+        //             .collect();
+
+        //         let short_ema_line = Line::new(short_ema_points)
+        //             .color(Color32::RED)
+        //             .name("Short EMA");
+
+        //         let long_ema_points: PlotPoints = ema
+        //             .iter()
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.long_ema]
+        //             })
+        //             .collect();
+
+        //         let long_ema_line = Line::new(long_ema_points)
+        //             .color(Color32::GREEN)
+        //             .name("Long EMA");
+
+        //         let last_price_points: PlotPoints = ema
+        //             .iter()
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let last_price_line = Line::new(last_price_points)
+        //             .color(Color32::BLUE)
+        //             .name(sec_code);
+
+        //         let transaction_reply_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::TransactionReply)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let transaction_reply_markers = Points::new(transaction_reply_points)
+        //             .name("Transaction Reply")
+        //             .color(Color32::ORANGE)
+        //             .shape(MarkerShape::Asterisk)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         let signal_buy_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::SignalBuy)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let signal_buy_markers = Points::new(signal_buy_points)
+        //             .name("Signal Buy")
+        //             .color(Color32::GREEN)
+        //             .shape(MarkerShape::Circle)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         let signal_sell_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::SignalSell)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let signal_sell_markers = Points::new(signal_sell_points)
+        //             .name("Signal Sell")
+        //             .color(Color32::RED)
+        //             .shape(MarkerShape::Circle)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         let order_buy_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::OrderBuy)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let order_buy_markers = Points::new(order_buy_points)
+        //             .name("Order Buy")
+        //             .color(Color32::GREEN)
+        //             .shape(MarkerShape::Cross)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         let order_sell_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::OrderSell)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let order_sell_markers = Points::new(order_sell_points)
+        //             .name("Order Sell")
+        //             .color(Color32::RED)
+        //             .shape(MarkerShape::Cross)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         let trade_buy_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::TradeBuy)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let trade_buy_markers = Points::new(trade_buy_points)
+        //             .name("Trade Buy")
+        //             .color(Color32::GREEN)
+        //             .shape(MarkerShape::Up)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         let trade_sell_points: PlotPoints = ema
+        //             .iter()
+        //             .filter(|e| e.operation == Operation::TradeSell)
+        //             .map(|e| {
+        //                 let datetime: NaiveDateTime = e.timestamp;
+        //                 [datetime.and_utc().timestamp_millis() as f64, e.last_price]
+        //             })
+        //             .collect();
+
+        //         let trade_sell_markers = Points::new(trade_sell_points)
+        //             .name("Trade Sell")
+        //             .color(Color32::RED)
+        //             .shape(MarkerShape::Down)
+        //             .filled(true)
+        //             .radius(5.0);
+
+        //         Plot::new("EMA Plot")
+        //             .view_aspect(2.0)
+        //             .x_axis_formatter(|mark: GridMark, _range: &std::ops::RangeInclusive<f64>| {
+        //                 let datetime = DateTime::from_timestamp_millis(mark.value as i64)
+        //                     .expect("Invalid timestamp");
+        //                 datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+        //             })
+        //             .label_formatter(|name, value| {
+        //                 let datetime = DateTime::from_timestamp_millis(value.x as i64)
+        //                     .expect("Invalid timestamp");
+        //                 format!(
+        //                     "{}\n{:.4}\n{}",
+        //                     name,
+        //                     value.y,
+        //                     datetime.format("%Y-%m-%d %H:%M:%S")
+        //                 )
+        //             })
+        //             .show(ui, |plot_ui| {
+        //                 plot_ui.line(short_ema_line);
+        //                 plot_ui.line(long_ema_line);
+        //                 plot_ui.line(last_price_line);
+        //                 plot_ui.points(transaction_reply_markers);
+        //                 plot_ui.points(signal_buy_markers);
+        //                 plot_ui.points(signal_sell_markers);
+        //                 plot_ui.points(order_buy_markers);
+        //                 plot_ui.points(order_sell_markers);
+        //                 plot_ui.points(trade_buy_markers);
+        //                 plot_ui.points(trade_sell_markers);
+        //             });
+        //     }
+        // });
 
         // Handle close request from the viewport.
         if ctx.input(|i| i.viewport().close_requested()) {

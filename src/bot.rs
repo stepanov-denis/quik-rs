@@ -4,7 +4,7 @@ use crate::ema;
 use crate::psql::Db;
 use crate::psql::Instrument;
 use crate::psql::Operation;
-use crate::quik::IsSell;
+// use crate::quik::IsSell;
 use crate::quik::OrderInfo;
 use crate::quik::Terminal;
 use crate::quik::TradeInfo;
@@ -18,13 +18,13 @@ use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
+// use tokio::sync::Mutex;
 use tokio::sync::MutexGuard as TokioMutexGuard;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 
-fn transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static str> {
+fn _transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static str> {
     if sec_code.is_empty() {
         return Err("SECCODE cannot be empty");
     }
@@ -39,7 +39,7 @@ fn transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static s
     Ok(transaction)
 }
 
-fn process_transaction(terminal_guard: TokioMutexGuard<'_, Terminal>, transaction_str: &str) {
+fn _process_transaction(terminal_guard: TokioMutexGuard<'_, Terminal>, transaction_str: &str) {
     let result = terminal_guard.send_async_transaction(transaction_str);
 
     match result {
@@ -56,27 +56,25 @@ fn is_weekday(weekday: Weekday) -> bool {
     )
 }
 
-/// Checks whether the current time is after the start of trading (01:05).
-fn is_after_start_time(hour: u32) -> bool {
-    hour > 6
+/// Returns the trading start and end hours based on the day of the week.
+fn trading_hours(weekday: Weekday) -> (u32, u32) {
+    if is_weekday(weekday) {
+        // For weekdays, trading starts after 3h and ends before 24h.
+        (3, 24)
+    } else {
+        // For weekends, trading starts after 6h and ends before 16h.
+        (6, 16)
+    }
 }
 
-/// Checks whether the current time is until the end of trading (23:00).
-fn is_before_end_time(hour: u32) -> bool {
-    hour < 16
-}
-
-/// Checks whether the specified time corresponds to the trading schedule.
-/// QUIK Junior's work schedule at the Technical Center:
-/// * 4:05 UTC+03 - start of the MOEX Stock Market trading session emulator (Main Market sector),
-///   active operations are available (placing and withdrawing orders).
-/// * 02:00 UTC+03 - stopping the emulator of the trading session of the Moscow Stock Exchange Stock Market (sector "Main Market"),
-///   the end of the application acceptance and execution period. Automatic withdrawal of all unsatisfied applications.
+/// Checks whether the current time corresponds to the trading schedule.
 fn is_trading_time() -> bool {
     let now = Utc::now();
-    is_weekday(now.weekday())
-        && is_after_start_time(now.hour())
-        && is_before_end_time(now.hour())
+    let current_hour = now.hour();
+    let (start_hour, end_hour) = trading_hours(now.weekday());
+
+    // Trading is active if time is after start_hour and before end_hour.
+    current_hour > start_hour && current_hour < end_hour
 }
 
 pub async fn trade(
@@ -109,7 +107,7 @@ pub async fn trade(
     // }
 
     // Preparing for trading
-    let timeframe: i32 = 30;
+    let timeframe: i32 = 15;
     let short_number_of_candles: i32 = 8;
     let long_number_of_candles: i32 = 21;
 
@@ -381,10 +379,10 @@ pub async fn trade(
 
                             // Updating the golden cross/death cross signal
                             if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {
-                                let operation = match signal {
-                                    Signal::Buy => "B",
-                                    Signal::Sell => "S",
-                                };
+                                // let operation = match signal {
+                                //     Signal::Buy => "B",
+                                //     Signal::Sell => "S",
+                                // };
                                 info!("{} => {:?}", instrument.sec_code, signal);
 
                                 // match transaction_str(&instrument.sec_code, operation) {
@@ -429,8 +427,8 @@ pub async fn trade(
                 }
 
                 // Pause before the next iteration
-                info!("sleep 300 seconds");
-                sleep(Duration::from_secs(300)).await;
+                info!("sleep 60 seconds");
+                sleep(Duration::from_secs(60)).await;
 
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             } => {

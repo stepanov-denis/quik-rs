@@ -459,6 +459,8 @@ impl Db {
           AND instrument_status = $2
           AND trade_date IS NOT NULL
           AND last_price_time IS NOT NULL
+          AND last_price IS NOT NULL
+          AND last_price <> 0.0
         ORDER BY sec_code ASC, trade_date DESC, last_price_time DESC; 
     ";
 
@@ -512,7 +514,7 @@ impl Db {
                 last_price_time
             );
 
-            let hysteresis_percentage = 1.0; // %
+            let hysteresis_percentage = 0.05; // %
             let hysteresis_periods = 1; // periods
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
@@ -579,7 +581,7 @@ impl Db {
             WHERE
                 -- Exclude candles during non-trading hours (updated schedule)
                 NOT (
-                ct.candle_start::time < TIME '10:00:00' OR ct.candle_start::time > TIME '18:39:59'
+                ct.candle_start::time < TIME '07:00:00' OR ct.candle_start::time > TIME '23:49:59'
                 )
             ),
             candles AS (
@@ -594,6 +596,7 @@ impl Db {
             FROM
                 candle_times ct
                 LEFT JOIN historical_trades ht ON ht.sec_code = (SELECT sec_code FROM params)
+                AND ht.last_price <> 0.0
                 AND (ht.trade_date + ht.last_price_time) >= ct.candle_start
                 AND (ht.trade_date + ht.last_price_time) < ct.candle_end
             GROUP BY
@@ -715,6 +718,7 @@ impl Db {
             SELECT last_price
             FROM historical_trades
             WHERE sec_code = $1
+            AND last_price <> 0.0
             ORDER BY trade_date DESC, last_price_time DESC
             LIMIT 1;
         ";
@@ -789,6 +793,7 @@ impl Db {
                 SELECT sec_code, short_ema, long_ema, last_price, operation, update_timestamp
                 FROM ema
                 WHERE sec_code = $1
+                AND last_price <> 0.0
                 ORDER BY update_timestamp DESC 
                 LIMIT 100000
             ) AS subquery
