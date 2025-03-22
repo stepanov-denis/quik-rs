@@ -634,11 +634,11 @@ impl Clone for Terminal {
 
 impl Terminal {
     /// The function is used to load the library Trans2QUIK.dll.
-    pub fn new(path: &str) -> Result<Self, Trans2QuikError> {
-        let path_to_quik = path.to_string();
+    pub fn new(path_to_lib: &str, path_to_quik: &str) -> Result<Self, Trans2QuikError> {
+        let path_to_quik = path_to_quik.to_string();
 
         // Loading a dynamic library Trans2QUIK.dll, which provides an API for interacting with QUIK.
-        let library = unsafe { Library::new(path)? };
+        let library = unsafe { Library::new(path_to_lib)? };
 
         // Calling a function from the library Trans2QUIK.dll for establishing communication with the QUIK terminal.
         let trans2quik_connect = load_symbol::<

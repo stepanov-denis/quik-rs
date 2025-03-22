@@ -18,11 +18,21 @@ use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-// use tokio::sync::Mutex;
+use tokio::sync::Mutex;
 use tokio::sync::MutexGuard as TokioMutexGuard;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
+use std::fs;
+use serde::{Serialize, Deserialize};
+
+// Config from config.yaml
+#[derive(Deserialize, Debug)]
+struct Config {
+    path_to_lib: String,
+    path_to_quik: String,
+    tg_token: String,
+}
 
 fn _transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static str> {
     if sec_code.is_empty() {
@@ -32,7 +42,7 @@ fn _transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static 
         return Err("OPERATION cannot be empty");
     }
 
-    let template = "ACCOUNT=NL0011100043; CLIENT_CODE=10526; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=; QUANTITY=1;";
+    let template = "ACCOUNT=NL0122200034; CLIENT_CODE=10127; TYPE=M; TRANS_ID=1; CLASSCODE=QJSIM; SECCODE=; ACTION=NEW_ORDER; OPERATION=; QUANTITY=1;";
     let replaced_sec_code = template.replace("SECCODE=", &format!("SECCODE={};", sec_code));
     let transaction = replaced_sec_code.replace("OPERATION=", &format!("OPERATION={};", operation));
 
@@ -82,32 +92,37 @@ pub async fn trade(
     database: Arc<Db>,
     instruments: Arc<RwLock<Vec<Instrument>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Чтение файла конфигурации
+    let config_data = fs::read_to_string("config.yaml")?;
+    let config: Config = serde_yaml::from_str(&config_data)?;
+
     // Создание нового экземпляра TgBot
-    let tg_bot = TgBot::new("8095625328:AAFsszchpufFt3bR-KnVVuAYKMcwXgWB5yA");
+    let tg_bot = TgBot::new(&config.tg_token);
     tg_bot.start_message_listener().await;
 
     // Preparing to work with QUIK
-    // let path = r"C:\QUIK_SBER\trans2quik.dll";
-    // let class_code = "";
-    // let sec_code = "";
+    let path_to_lib = &config.path_to_lib;
+    let path_to_quik = &config.path_to_quik;
+    let class_code = "";
+    let sec_code = "";
 
-    // let terminal = Terminal::new(path)?;
-    // let terminal = Arc::new(Mutex::new(terminal));
-    // {
-    //     let terminal_guard = terminal.lock().await;
-    //     terminal_guard.connect()?;
-    //     terminal_guard.is_dll_connected()?;
-    //     terminal_guard.is_quik_connected()?;
-    //     terminal_guard.set_connection_status_callback()?;
-    //     terminal_guard.set_transactions_reply_callback()?;
-    //     terminal_guard.subscribe_orders(class_code, sec_code)?;
-    //     terminal_guard.subscribe_trades(class_code, sec_code)?;
-    //     terminal_guard.start_orders();
-    //     terminal_guard.start_trades();
-    // }
+    let terminal = Terminal::new(path_to_lib, path_to_quik)?;
+    let terminal = Arc::new(Mutex::new(terminal));
+    {
+        let terminal_guard = terminal.lock().await;
+        terminal_guard.connect()?;
+        terminal_guard.is_dll_connected()?;
+        terminal_guard.is_quik_connected()?;
+        terminal_guard.set_connection_status_callback()?;
+        terminal_guard.set_transactions_reply_callback()?;
+        terminal_guard.subscribe_orders(class_code, sec_code)?;
+        terminal_guard.subscribe_trades(class_code, sec_code)?;
+        terminal_guard.start_orders();
+        terminal_guard.start_trades();
+    }
 
     // Preparing for trading
-    let timeframe: i32 = 15;
+    let timeframe: i32 = 5;
     let short_number_of_candles: i32 = 8;
     let long_number_of_candles: i32 = 21;
 
@@ -154,17 +169,17 @@ pub async fn trade(
                     AppCommand::Shutdown => {
                         info!("shutdown signal");
                         // Access to terminal via Mutex
-                        // let terminal_guard = terminal.lock().await;
+                        let terminal_guard = terminal.lock().await;
 
-                        // if let Err(err) = terminal_guard.unsubscribe_orders() {
-                        //     error!("error unsubscribing from orders: {}", err);
-                        // }
-                        // if let Err(err) = terminal_guard.unsubscribe_trades() {
-                        //     error!("error unsubscribing from trades: {}", err);
-                        // }
-                        // if let Err(err) = terminal_guard.disconnect() {
-                        //     error!("error disconnecting: {}", err);
-                        // }
+                        if let Err(err) = terminal_guard.unsubscribe_orders() {
+                            error!("error unsubscribing from orders: {}", err);
+                        }
+                        if let Err(err) = terminal_guard.unsubscribe_trades() {
+                            error!("error unsubscribing from trades: {}", err);
+                        }
+                        if let Err(err) = terminal_guard.disconnect() {
+                            error!("error disconnecting: {}", err);
+                        }
 
                         info!("shutdown sequence completed");
                         break;
@@ -369,13 +384,13 @@ pub async fn trade(
                                 }
                             };
 
-                            let operation = Operation::IsNone;
+                            // let operation = Operation::IsNone;
 
-                            let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
+                            // let update_timestamp: NaiveDateTime = Utc::now().naive_utc();
 
-                            if let Err(e) = &database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
-                                error!("insert into ema error: {}", e);
-                            }
+                            // if let Err(e) = &database.insert_ema(&instrument.sec_code, short_ema, long_ema, last_price, operation, update_timestamp).await {
+                            //     error!("insert into ema error: {}", e);
+                            // }
 
                             // Updating the golden cross/death cross signal
                             if let Some(signal) = instrument.crossover_signal.update(short_ema, long_ema) {

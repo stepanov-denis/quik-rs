@@ -514,7 +514,7 @@ impl Db {
                 last_price_time
             );
 
-            let hysteresis_percentage = 0.05; // %
+            let hysteresis_percentage = 0.0001; // %
             let hysteresis_periods = 1; // periods
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
@@ -571,7 +571,7 @@ impl Db {
                 SELECT
                     generate_series(
                     -- Start from an earlier candle to account for excluded candles
-                    (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 50 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
+                    (SELECT ts FROM last_candle_start_ts) - ((SELECT num_candles FROM params) + 105 - 1) * (SELECT timeframe_min FROM params) * INTERVAL '1 minute',
                     -- End at the last fully completed candle
                     (SELECT ts FROM last_candle_start_ts),
                     -- Increment by the timeframe
