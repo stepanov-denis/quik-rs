@@ -9,29 +9,31 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use tracing::error;
+use crate::config::Config;
 mod app;
 mod bot;
+mod config;
 mod ema;
 mod psql;
 mod quik;
 mod signal;
 mod tg;
 
+
 #[tokio::main]
 async fn main() -> eframe::Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
 
+    let config = Config::new("config.yaml")?;
+
     let (command_sender, command_receiver) = mpsc::unbounded_channel();
 
-    let connection_str = "host=localhost user=postgres dbname=postgres password=password";
-    let database = Arc::new(psql::Db::new(connection_str).await?);
+    let database = Arc::new(psql::Db::new(&config.psql_conn_str).await?);
     database.init().await?;
 
-    let class_code = "TQBR";
-    let instrument_status = "торгуется";
     let instruments = Arc::new(RwLock::new(
         database
-            .get_instruments(class_code, instrument_status)
+            .get_instruments(&config.class_code, &config.instrument_status, config.hysteresis_percentage, config.hysteresis_periods)
             .await?,
     ));
 
@@ -39,7 +41,7 @@ async fn main() -> eframe::Result<(), Box<dyn Error>> {
     let instruments_clone = Arc::clone(&instruments);
 
     tokio::spawn(async move {
-        if let Err(e) = bot::trade(command_receiver, database_clone, instruments_clone).await {
+        if let Err(e) = bot::trade(command_receiver, database_clone, instruments_clone, config).await {
             error!("something went wrong, bot error: {}", e);
         }
     });

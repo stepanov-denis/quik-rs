@@ -22,9 +22,9 @@ enum State {
 /// Structure for generating trading signals with hysteresis
 pub struct CrossoverSignal {
     hysteresis_percentage: f64,
-    hysteresis_periods: usize,
+    hysteresis_periods: u32,
     state: State,
-    time_in_state: usize,
+    time_in_state: u32,
     last_signal: Option<Signal>,
 }
 
@@ -32,7 +32,7 @@ impl CrossoverSignal {
     /// Creates a new CrossoverSignal structure with the given hysteresis parameters:
     /// hysteresis_percentage - the percentage threshold for the EMA difference to trigger a state change.
     /// hysteresis_periods - the number of consecutive periods the condition must be met before the signal is sent.
-    pub fn new(hysteresis_percentage: f64, hysteresis_periods: usize) -> Self {
+    pub fn new(hysteresis_percentage: f64, hysteresis_periods: u32) -> Self {
         Self {
             hysteresis_percentage,
             hysteresis_periods,

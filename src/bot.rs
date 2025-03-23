@@ -1,6 +1,7 @@
 //! # bot work for algo trading
 use crate::app::AppCommand;
 use crate::ema;
+use crate::config::Config;
 use crate::psql::Db;
 use crate::psql::Instrument;
 use crate::psql::Operation;
@@ -23,16 +24,6 @@ use tokio::sync::MutexGuard as TokioMutexGuard;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
-use std::fs;
-use serde::{Serialize, Deserialize};
-
-// Config from config.yaml
-#[derive(Deserialize, Debug)]
-struct Config {
-    path_to_lib: String,
-    path_to_quik: String,
-    tg_token: String,
-}
 
 fn _transaction_str(sec_code: &str, operation: &str) -> Result<String, &'static str> {
     if sec_code.is_empty() {
@@ -73,7 +64,7 @@ fn trading_hours(weekday: Weekday) -> (u32, u32) {
         (3, 24)
     } else {
         // For weekends, trading starts after 6h and ends before 16h.
-        (6, 16)
+        (6, 24)
     }
 }
 
@@ -91,11 +82,8 @@ pub async fn trade(
     mut command_receiver: mpsc::UnboundedReceiver<AppCommand>,
     database: Arc<Db>,
     instruments: Arc<RwLock<Vec<Instrument>>>,
+    config: Config,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Чтение файла конфигурации
-    let config_data = fs::read_to_string("config.yaml")?;
-    let config: Config = serde_yaml::from_str(&config_data)?;
-
     // Создание нового экземпляра TgBot
     let tg_bot = TgBot::new(&config.tg_token);
     tg_bot.start_message_listener().await;
@@ -103,8 +91,8 @@ pub async fn trade(
     // Preparing to work with QUIK
     let path_to_lib = &config.path_to_lib;
     let path_to_quik = &config.path_to_quik;
-    let class_code = "";
-    let sec_code = "";
+    let class_code = &config.class_code;
+    let sec_code = &config.sec_code;
 
     let terminal = Terminal::new(path_to_lib, path_to_quik)?;
     let terminal = Arc::new(Mutex::new(terminal));
@@ -122,9 +110,9 @@ pub async fn trade(
     }
 
     // Preparing for trading
-    let timeframe: i32 = 5;
-    let short_number_of_candles: i32 = 8;
-    let long_number_of_candles: i32 = 21;
+    let timeframe: i32 = config.timeframe;
+    let short_num_of_candles: i32 = config.short_num_of_candles;
+    let long_num_of_candles: i32 = config.long_num_of_candles;
 
     // Инициализируем канал
     let (transaction_sender, mut transaction_receiver): (
@@ -344,7 +332,7 @@ pub async fn trade(
                                 &database,
                                 &instrument.sec_code,
                                 timeframe,
-                                short_number_of_candles,
+                                short_num_of_candles,
                             ).await {
                                 Ok(short_ema) => {
                                     info!("short_ema: {}", short_ema);
@@ -361,7 +349,7 @@ pub async fn trade(
                                 &database,
                                 &instrument.sec_code,
                                 timeframe,
-                                long_number_of_candles,
+                                long_num_of_candles,
                             ).await {
                                 Ok(long_ema) => {
                                     info!("long_ema: {}", long_ema);

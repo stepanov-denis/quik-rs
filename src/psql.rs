@@ -444,6 +444,8 @@ impl Db {
         &self,
         class_code: &str,
         instrument_status: &str,
+        hysteresis_percentage: f64,
+        hysteresis_periods: u32,
     ) -> Result<Vec<Instrument>, RunError<bb8_postgres::tokio_postgres::Error>> {
         // Get a connection from the pool
         let conn = self.pool.get().await.map_err(|e| {
@@ -514,8 +516,6 @@ impl Db {
                 last_price_time
             );
 
-            let hysteresis_percentage = 0.0001; // %
-            let hysteresis_periods = 1; // periods
             let crossover_signal = CrossoverSignal::new(hysteresis_percentage, hysteresis_periods);
 
             let instrument = Instrument {
